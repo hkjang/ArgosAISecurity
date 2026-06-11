@@ -1,5 +1,6 @@
 #!/bin/sh
-# E2E 스모크 테스트: 에이전트 기동 → 랜섬웨어 패턴 시뮬레이션 → 탐지·백업·복구 확인.
+# E2E 스모크 테스트: 에이전트 기동 → 랜섬웨어 시뮬레이션 → 탐지·백업·복구,
+# 그리고 Phase 3 정책 서명·검증 확인.
 # 사용: docker run --rm -v <repo>:/src -v argos-target-cache:/src/target -w /src rust:latest sh scripts/smoke-test.sh
 set -e
 
@@ -52,6 +53,10 @@ echo "=== argos threats ==="
 "$BIN/argos" --config "$WORK/argos.toml" threats -n 3
 
 echo ""
+echo "=== argos processes (Linux 프로세스 감시) ==="
+"$BIN/argos" --config "$WORK/argos.toml" processes -n 5
+
+echo ""
 echo "=== 복구: contract.docx 버전 목록 ==="
 "$BIN/argos" --config "$WORK/argos.toml" restore "$WORK/watched/contract.docx" --list
 
@@ -60,14 +65,50 @@ echo "=== 복구 실행 (공격 시작 시각 $ATTACK_MS 이전 버전) ==="
 "$BIN/argos" --config "$WORK/argos.toml" restore "$WORK/watched/contract.docx" --before-ms "$ATTACK_MS"
 echo "복구된 내용: $(cat "$WORK/watched/contract.docx")"
 
-# 검증: 탐지가 1건 이상이어야 하고, 복구 내용이 원본과 일치해야 한다.
 DETECTIONS=$("$BIN/argos" --config "$WORK/argos.toml" threats -n 1 | grep -c "behavior" || true)
 RESTORED=$(cat "$WORK/watched/contract.docx")
 if [ "$DETECTIONS" -ge 1 ] && [ "$RESTORED" = "important business document" ]; then
-    echo ""
-    echo "SMOKE TEST PASSED: 탐지 OK, 복구 OK"
+    echo "  -> 탐지 OK, 복구 OK"
 else
     echo ""
     echo "SMOKE TEST FAILED: detections=$DETECTIONS restored='$RESTORED'"
     exit 1
 fi
+
+echo ""
+echo "=== Phase 3: 정책 서명·검증 ==="
+"$BIN/argos" policy gen-key > "$WORK/keys.txt"
+SECRET=$(sed -n '2p' "$WORK/keys.txt")
+PUBLIC=$(sed -n '5p' "$WORK/keys.txt")
+echo "$SECRET" > "$WORK/sign.key"
+cat > "$WORK/policy.toml" <<EOF
+version = 3
+[detection]
+window_secs = 8
+detect_score = 35.0
+[response]
+auto_block = false
+block_score = 75.0
+EOF
+"$BIN/argos" policy sign "$WORK/policy.toml" --key-file "$WORK/sign.key"
+
+cat > "$WORK/argos-policy.toml" <<EOF
+db_path = "$WORK/argos.db"
+[policy]
+path = "$WORK/policy.toml"
+pubkey = "$PUBLIC"
+EOF
+echo "-- 정상 정책 검증 --"
+"$BIN/argos" --config "$WORK/argos-policy.toml" policy verify
+
+echo "-- 변조 정책 거부 확인 --"
+echo "version = 999" >> "$WORK/policy.toml"
+if "$BIN/argos" --config "$WORK/argos-policy.toml" policy verify 2>/dev/null; then
+    echo "SMOKE TEST FAILED: 변조된 정책이 검증을 통과함"
+    exit 1
+else
+    echo "  -> 변조 정책 거부 OK"
+fi
+
+echo ""
+echo "SMOKE TEST PASSED: 탐지·복구·정책서명 OK"

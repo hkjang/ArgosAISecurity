@@ -3,6 +3,8 @@
 //! 요건서 9장. Phase 1은 프로세스 차단만 구현한다.
 //! 경로 잠금, 네트워크 격리, 세션 제한, 승인 기반 대응은 Phase 3.
 
+pub mod isolate;
+
 use argos_common::Pid;
 
 #[derive(Debug, Clone)]

@@ -4,19 +4,22 @@ AI 기반 Linux 서버 보안 플랫폼 — 랜섬웨어·이상 행위·권한 
 
 전체 제품 요건은 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md), 구조 설명은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 참고.
 
-## 현재 상태: MVP Phase 1 + Phase 2 핵심
+## 현재 상태: MVP Phase 1 + 2 + 3 핵심
 
 | 구성 요소 | 크레이트 | 상태 |
 | --- | --- | --- |
 | Agent Core (데몬, 파이프라인) | `argos-agent` | 구현 |
 | 파일 이벤트 감시 | `argos-sensor` | notify(기본) + fanotify(Linux, pid 제공) |
+| 프로세스 감시 | `argos-sensor` | /proc 폴링 (Linux) → eBPF는 후속 |
 | 행위 기반 랜섬웨어 탐지 | `argos-detect` | 슬라이딩 윈도우 점수 + 엔트로피 |
 | 위험 프로세스 차단 | `argos-response` | Linux SIGKILL/SIGSTOP (기본 dry-run) |
+| 네트워크 격리 | `argos-response` | iptables 기반 (`argos isolate`) |
 | 로컬 로그 저장 | `argos-storage` | SQLite(WAL) |
 | 백업·복구 | `argos-recovery` | 내용 주소 저장 + 해시 검증 복구 |
-| AI Threat Summary | `argos-brain` | Claude API 기반 사고 분석 (`argos explain`) |
-| 중앙관리 서버 | `argos-central` | 등록/수집/조회 REST API |
-| CLI | `argos-cli` | status/events/threats/scan/doctor/restore/explain |
+| 정책 서명·검증 | `argos-policy` | Ed25519 — 서명된 정책만 적용 |
+| AI Threat Summary / Copilot | `argos-brain` | Claude API (`argos explain` / `argos ask`) |
+| 중앙관리 서버 + 대시보드 | `argos-central` | REST API + HTML 대시보드 |
+| CLI | `argos-cli` | status/events/threats/processes/scan/doctor/restore/explain/ask/isolate/policy |
 
 ## 빌드 및 실행
 
@@ -43,12 +46,28 @@ cargo run -p argos-cli -- restore ./watched/important.docx --list   # 버전 확
 cargo run -p argos-cli -- restore ./watched/important.docx          # 최신 버전 복구
 cargo run -p argos-cli -- restore ./watched/important.docx --before-ms 1760000000000
 
-# AI 사고 분석 (ANTHROPIC_API_KEY 필요)
+# AI 사고 분석 / 자연어 질의 (ANTHROPIC_API_KEY 필요)
 export ANTHROPIC_API_KEY=sk-ant-...
-cargo run -p argos-cli -- explain 1    # ID는 `argos threats`에서 확인
+cargo run -p argos-cli -- explain 1                      # ID는 `argos threats`에서 확인
+cargo run -p argos-cli -- ask "지난 1시간 동안 위험한 활동 있었어?"
 
-# 중앙관리 서버
+# 프로세스 실행 이력 (Linux)
+cargo run -p argos-cli -- processes -n 20
+
+# 정책 서명·배포 (요건서 11장 — 서명된 정책만 적용)
+cargo run -p argos-cli -- policy gen-key > keys.txt      # 서명키/검증키 생성
+# policy.toml 작성 후:
+cargo run -p argos-cli -- policy sign policy.toml --key-file signing.key
+cargo run -p argos-cli -- policy verify                  # argos.toml [policy] 설정 사용
+cargo run -p argos-cli -- policy show
+
+# 네트워크 격리 (Linux, root)
+sudo cargo run -p argos-cli -- isolate --allow 10.0.0.5  # 중앙 서버 등은 자동 허용
+sudo cargo run -p argos-cli -- isolate --release
+
+# 중앙관리 서버 + 대시보드
 cargo run -p argos-central -- --listen 0.0.0.0:8420 --token <공유토큰>
+#  → http://localhost:8420/ 에서 대시보드 (토큰 입력 후 현황 확인)
 curl http://localhost:8420/api/v1/agents -H "Authorization: Bearer <공유토큰>"
 ```
 

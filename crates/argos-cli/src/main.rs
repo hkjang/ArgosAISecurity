@@ -53,12 +53,50 @@ enum Command {
         #[arg(long)]
         list: bool,
     },
-    /// 서버 격리 (Phase 3)
-    Isolate,
-    /// 정책 조회 및 검증 (Phase 3)
-    Policy,
-    /// 룰·에이전트 업데이트 (Phase 3)
+    /// 최근 프로세스 실행 이력 조회 (Linux 프로세스 감시)
+    Processes {
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// 자연어로 보안 현황 질의 — AI Copilot (ANTHROPIC_API_KEY 필요)
+    Ask {
+        /// 질문 (예: "지난 1시간 동안 위험한 활동 있었어?")
+        question: Vec<String>,
+    },
+    /// 서버 네트워크 격리 (Linux, root 필요)
+    Isolate {
+        /// 격리 해제
+        #[arg(long)]
+        release: bool,
+        /// 격리 중에도 허용할 호스트/CIDR (반복 지정 가능)
+        #[arg(long)]
+        allow: Vec<String>,
+    },
+    /// 정책 관리: 조회·키 생성·서명·검증
+    Policy {
+        #[command(subcommand)]
+        action: PolicyAction,
+    },
+    /// 룰·에이전트 업데이트 (Phase 4)
     Update,
+}
+
+#[derive(Subcommand)]
+enum PolicyAction {
+    /// 현재 적용 정책과 서명 검증 상태 표시
+    Show,
+    /// Ed25519 키쌍 생성 (서명키는 안전한 곳에 보관)
+    GenKey,
+    /// 정책 파일 서명 → <policy>.sig 생성
+    Sign {
+        /// 정책 파일 경로
+        policy: PathBuf,
+        /// 서명키(hex 64자)가 담긴 파일
+        #[arg(long)]
+        key_file: PathBuf,
+    },
+    /// 정책 파일 서명 검증 (argos.toml [policy] 설정 사용)
+    Verify,
 }
 
 fn main() {
@@ -77,9 +115,11 @@ fn main() {
             before_ms,
             list,
         } => cmd_restore(&config, &path, before_ms, list),
-        Command::Isolate => not_yet("isolate", "네트워크 격리 (Phase 3)"),
-        Command::Policy => not_yet("policy", "정책 관리 (Phase 3)"),
-        Command::Update => not_yet("update", "업데이트 채널 (Phase 3)"),
+        Command::Processes { limit } => cmd_processes(&config, limit),
+        Command::Ask { question } => cmd_ask(&config, &question.join(" ")),
+        Command::Isolate { release, allow } => cmd_isolate(&config, release, &allow),
+        Command::Policy { action } => cmd_policy(&config, action),
+        Command::Update => not_yet("update", "업데이트 채널 (Phase 4)"),
     };
 
     if let Err(e) = result {
@@ -247,6 +287,157 @@ fn cmd_restore(
         &version.hash[..16]
     );
     Ok(())
+}
+
+fn cmd_processes(config: &AgentConfig, limit: usize) -> CmdResult {
+    let store = open_store(config)?;
+    let rows = store.recent_processes(limit)?;
+    if rows.is_empty() {
+        println!("기록된 프로세스 이벤트가 없습니다 (프로세스 감시는 Linux 전용).");
+        return Ok(());
+    }
+    println!(
+        "{:<15} {:<8} {:<8} {:<6} {:<16} CMDLINE",
+        "TIMESTAMP(ms)", "PID", "PPID", "UID", "COMM"
+    );
+    for (ts, pid, ppid, uid, comm, cmdline) in rows {
+        println!("{ts:<15} {pid:<8} {ppid:<8} {uid:<6} {comm:<16} {cmdline}");
+    }
+    Ok(())
+}
+
+fn cmd_ask(config: &AgentConfig, question: &str) -> CmdResult {
+    if question.trim().is_empty() {
+        return Err("질문을 입력하세요. 예: argos ask \"지난 1시간 동안 위험한 활동 있었어?\"".into());
+    }
+    let store = open_store(config)?;
+
+    let status_summary = format!(
+        "감시 경로: {} / 자동 차단: {} / 누적 이벤트: {} / 누적 탐지: {}",
+        config
+            .watch_paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+        if config.response.auto_block { "활성" } else { "비활성" },
+        store.event_count()?,
+        store.detection_count()?,
+    );
+    let recent_detections = store
+        .recent_detections_with_id(30)?
+        .into_iter()
+        .map(|d| {
+            format!(
+                "[{}] ts={} severity={} score={:.0} rule={} pid={} {}",
+                d.id, d.timestamp_ms, d.severity, d.score, d.rule, d.pid, d.summary
+            )
+        })
+        .collect();
+    let recent_events = store
+        .recent_events(80)?
+        .into_iter()
+        .map(|(ts, pid, path, action)| format!("ts={ts} pid={pid} {action} {path}"))
+        .collect();
+    let recent_processes = store
+        .recent_processes(40)?
+        .into_iter()
+        .map(|(ts, pid, ppid, uid, comm, cmdline)| {
+            format!("ts={ts} pid={pid} ppid={ppid} uid={uid} {comm} :: {cmdline}")
+        })
+        .collect();
+
+    let ctx = argos_brain::CopilotContext {
+        status_summary,
+        recent_detections,
+        recent_events,
+        recent_processes,
+    };
+
+    eprintln!("AI 분석 중... (모델 호출)");
+    let explainer = ThreatExplainer::from_env()?;
+    println!("{}", explainer.ask(question, &ctx)?);
+    Ok(())
+}
+
+fn cmd_isolate(config: &AgentConfig, release: bool, allow: &[String]) -> CmdResult {
+    use argos_response::isolate;
+    if release {
+        isolate::release_isolation()?;
+        println!("네트워크 격리를 해제했습니다.");
+        return Ok(());
+    }
+    // 중앙 서버 호스트는 항상 허용 목록에 포함시킨다 (격리 중에도 보고 유지).
+    let mut allow_hosts: Vec<String> = allow.to_vec();
+    if !config.central.url.is_empty() {
+        if let Some(host) = extract_host(&config.central.url) {
+            if !allow_hosts.contains(&host) {
+                allow_hosts.push(host);
+            }
+        }
+    }
+    println!("서버를 격리합니다 — loopback/기존 연결/허용 호스트({})만 통과", allow_hosts.len());
+    isolate::isolate_host(&allow_hosts)?;
+    println!("격리 적용 완료. 해제: argos isolate --release");
+    Ok(())
+}
+
+fn extract_host(url: &str) -> Option<String> {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    let host_port = rest.split('/').next()?;
+    let host = host_port.split(':').next()?;
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+fn cmd_policy(config: &AgentConfig, action: PolicyAction) -> CmdResult {
+    match action {
+        PolicyAction::GenKey => {
+            let (secret, public) = argos_policy::gen_keypair();
+            println!("서명키(비밀, 관리 머신에만 보관):\n{secret}\n");
+            println!("검증키(공개, argos.toml [policy] pubkey에 설정):\n{public}");
+            Ok(())
+        }
+        PolicyAction::Sign { policy, key_file } => {
+            let secret = std::fs::read_to_string(&key_file)?;
+            let sig_path = argos_policy::sign_file(&policy, secret.trim())?;
+            println!("서명 완료: {}", sig_path.display());
+            Ok(())
+        }
+        PolicyAction::Verify => {
+            if !config.policy.is_enabled() {
+                return Err("argos.toml에 [policy] path/pubkey가 설정되어 있지 않습니다.".into());
+            }
+            argos_policy::verify_file(&config.policy.path, &config.policy.pubkey)?;
+            println!("서명 검증 성공: {}", config.policy.path.display());
+            Ok(())
+        }
+        PolicyAction::Show => {
+            if !config.policy.is_enabled() {
+                println!("서명 정책 미사용 — argos.toml의 [detection]/[response]가 그대로 적용됩니다.");
+            } else {
+                match argos_policy::load_verified(&config.policy.path, &config.policy.pubkey) {
+                    Ok(p) => {
+                        println!("정책 파일   : {} (서명 검증 OK)", config.policy.path.display());
+                        println!("정책 버전   : {}", p.version);
+                        println!("탐지 설정   : {:?}", p.detection);
+                        println!("대응 설정   : {:?}", p.response);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        println!("정책 파일   : {} — 검증 실패: {e}", config.policy.path.display());
+                        println!("(에이전트는 이 정책을 적용하지 않습니다)");
+                    }
+                }
+            }
+            println!("\n[현재 유효 탐지 설정]\n{:?}", config.detection);
+            println!("\n[현재 유효 대응 설정]\n{:?}", config.response);
+            Ok(())
+        }
+    }
 }
 
 /// 경로 하위 파일들의 엔트로피를 검사해 암호화 의심 파일을 나열한다.

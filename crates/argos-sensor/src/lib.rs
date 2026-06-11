@@ -15,6 +15,11 @@ use tokio::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 mod fanotify;
+#[cfg(target_os = "linux")]
+pub mod procmon;
+
+#[cfg(target_os = "linux")]
+pub use procmon::spawn_proc_monitor;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SensorError {

@@ -32,6 +32,8 @@ pub struct AgentConfig {
     pub response: ResponseConfig,
     pub backup: BackupConfig,
     pub central: CentralConfig,
+    pub policy: PolicyFileConfig,
+    pub process_monitor: ProcessMonitorConfig,
 }
 
 impl Default for AgentConfig {
@@ -44,6 +46,42 @@ impl Default for AgentConfig {
             response: ResponseConfig::default(),
             backup: BackupConfig::default(),
             central: CentralConfig::default(),
+            policy: PolicyFileConfig::default(),
+            process_monitor: ProcessMonitorConfig::default(),
+        }
+    }
+}
+
+/// 서명된 정책 파일 설정 (요건서 11장 — 서명된 정책만 적용).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PolicyFileConfig {
+    /// 정책 파일 경로. 비어 있으면 argos.toml의 값을 그대로 사용.
+    pub path: PathBuf,
+    /// Ed25519 검증키 (hex 64자). path 설정 시 필수 — 없으면 정책 미적용.
+    pub pubkey: String,
+}
+
+impl PolicyFileConfig {
+    pub fn is_enabled(&self) -> bool {
+        !self.path.as_os_str().is_empty()
+    }
+}
+
+/// 프로세스 감시 설정 (요건서 4장 — Linux 전용, /proc 폴링).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProcessMonitorConfig {
+    pub enabled: bool,
+    /// /proc 스캔 간격(ms).
+    pub interval_ms: u64,
+}
+
+impl Default for ProcessMonitorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_ms: 1000,
         }
     }
 }

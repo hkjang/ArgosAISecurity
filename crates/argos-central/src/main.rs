@@ -133,6 +133,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let app = Router::new()
+        .route(
+            "/",
+            get(|| async { axum::response::Html(include_str!("dashboard.html")) }),
+        )
         .route("/healthz", get(|| async { "ok" }))
         .route("/api/v1/agents/register", post(register_agent))
         .route("/api/v1/agents", get(list_agents))

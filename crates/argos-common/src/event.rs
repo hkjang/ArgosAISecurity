@@ -29,22 +29,41 @@ pub struct FileEvent {
     pub entropy: Option<f64>,
 }
 
+/// 프로세스 실행 이벤트 (요건서 4. 프로세스 감시).
+///
+/// Phase 3: /proc 폴링 기반 — exec 추적, 부모·자식 관계, 실행 사용자.
+/// eBPF 센서로 교체 시 폴링 간격 사이에 종료되는 단명 프로세스도 잡는다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessEvent {
+    pub timestamp_ms: u64,
+    pub pid: Pid,
+    pub ppid: Pid,
+    pub uid: u32,
+    /// 커널 comm (프로세스 이름, 최대 15자).
+    pub comm: String,
+    /// 전체 명령행.
+    pub cmdline: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     File(FileEvent),
-    // Phase 2+: Process(ProcessEvent), Network(NetworkEvent), Privilege(PrivilegeEvent)
+    Process(ProcessEvent),
+    // Phase 3+: Network(NetworkEvent), Privilege(PrivilegeEvent)
 }
 
 impl Event {
     pub fn kind(&self) -> &'static str {
         match self {
             Event::File(_) => "file",
+            Event::Process(_) => "process",
         }
     }
 
     pub fn timestamp_ms(&self) -> u64 {
         match self {
             Event::File(e) => e.timestamp_ms,
+            Event::Process(e) => e.timestamp_ms,
         }
     }
 }

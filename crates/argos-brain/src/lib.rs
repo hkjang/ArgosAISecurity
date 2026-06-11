@@ -116,24 +116,90 @@ impl ThreatExplainer {
 
     /// 탐지 1건을 사람이 읽을 수 있는 사고 분석으로 변환한다 (AI Threat Summary).
     pub fn explain(&self, ctx: &DetectionContext) -> Result<String, BrainError> {
-        let user_prompt = build_prompt(ctx);
         let request = MessagesRequest {
             model: &self.model,
             max_tokens: 2048,
             system: SYSTEM_PROMPT,
             messages: vec![Message {
                 role: "user",
-                content: user_prompt,
+                content: build_prompt(ctx),
             }],
         };
+        self.send(&request)
+    }
+}
 
+/// Copilot 질의에 제공하는 서버 현황 근거 (요건서 5장 AI Query Copilot).
+#[derive(Debug, Clone, Default)]
+pub struct CopilotContext {
+    /// 에이전트 상태 요약 (감시 경로, 누적 카운트 등).
+    pub status_summary: String,
+    /// 최근 탐지 로그 라인.
+    pub recent_detections: Vec<String>,
+    /// 최근 파일 이벤트 로그 라인.
+    pub recent_events: Vec<String>,
+    /// 최근 프로세스 실행 로그 라인.
+    pub recent_processes: Vec<String>,
+}
+
+const COPILOT_SYSTEM: &str = "\
+당신은 Argos AI Security의 보안 코파일럿입니다. 관리자의 자연어 질문에 한국어로 답합니다.
+
+규칙:
+- 제공된 서버 상태/탐지/이벤트/프로세스 데이터에 있는 근거만 사용하세요.
+- 데이터에 없는 사실은 추정하지 말고 '제공된 로그에서 확인되지 않음'이라고 답하세요.
+- 판단의 근거가 된 로그 라인(시각, 경로, pid)을 함께 제시하세요.
+- 위험도 평가를 요청받으면 점수·심각도와 함께 그 이유를 설명하세요.
+- 답변은 간결하게, 핵심부터.";
+
+impl ThreatExplainer {
+    /// 자연어 질문에 서버 데이터를 근거로 답한다 (argos ask).
+    pub fn ask(&self, question: &str, ctx: &CopilotContext) -> Result<String, BrainError> {
+        let mut content = String::new();
+        content.push_str("[서버 상태]\n");
+        content.push_str(&ctx.status_summary);
+        content.push_str("\n\n[최근 탐지]\n");
+        if ctx.recent_detections.is_empty() {
+            content.push_str("(없음)\n");
+        }
+        for line in ctx.recent_detections.iter().take(30) {
+            content.push_str(line);
+            content.push('\n');
+        }
+        content.push_str("\n[최근 파일 이벤트]\n");
+        for line in ctx.recent_events.iter().take(80) {
+            content.push_str(line);
+            content.push('\n');
+        }
+        content.push_str("\n[최근 프로세스 실행]\n");
+        for line in ctx.recent_processes.iter().take(40) {
+            content.push_str(line);
+            content.push('\n');
+        }
+        content.push_str("\n[질문]\n");
+        content.push_str(question);
+
+        let request = MessagesRequest {
+            model: &self.model,
+            max_tokens: 1536,
+            system: COPILOT_SYSTEM,
+            messages: vec![Message {
+                role: "user",
+                content,
+            }],
+        };
+        self.send(&request)
+    }
+
+    /// Messages API 공통 호출.
+    fn send(&self, request: &MessagesRequest<'_>) -> Result<String, BrainError> {
         let resp = self
             .client
             .post(API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", API_VERSION)
             .header("content-type", "application/json")
-            .json(&request)
+            .json(request)
             .send()?;
 
         let status = resp.status();

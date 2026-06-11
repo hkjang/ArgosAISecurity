@@ -13,4 +13,6 @@ argos-storage.workspace = true
 argos-detect.workspace = true
 argos-recovery.workspace = true
 argos-brain.workspace = true
+argos-policy.workspace = true
+argos-response.workspace = true
 clap.workspace = true

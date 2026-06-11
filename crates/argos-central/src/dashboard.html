@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Argos Central</title>
+<style>
+  body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #0f1419; color: #e6e6e6; }
+  header { background: #1a2332; padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; margin: 0; color: #4fc3f7; }
+  header input { background: #0f1419; border: 1px solid #2e3d52; color: #e6e6e6; padding: 6px 10px; border-radius: 4px; width: 260px; }
+  header button { background: #4fc3f7; border: 0; color: #0f1419; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-weight: 600; }
+  main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  h2 { font-size: 15px; color: #8ab4f8; border-bottom: 1px solid #2e3d52; padding-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: #9aa5b1; font-weight: 600; padding: 6px 8px; }
+  td { padding: 6px 8px; border-top: 1px solid #1e2936; }
+  .sev-critical { color: #ff5252; font-weight: 700; }
+  .sev-high     { color: #ff8a65; font-weight: 600; }
+  .sev-medium   { color: #ffd54f; }
+  .sev-low      { color: #81c784; }
+  .muted { color: #6b7785; }
+  #error { color: #ff8a65; padding: 8px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ARGOS Central</h1>
+  <input id="token" type="password" placeholder="API 토큰 (Bearer)">
+  <button onclick="saveTokenAndLoad()">연결</button>
+  <span id="error"></span>
+</header>
+<main>
+  <h2>에이전트 현황</h2>
+  <table id="agents"><thead><tr>
+    <th>Agent ID</th><th>Hostname</th><th>태그</th><th>마지막 보고</th><th>누적 탐지</th>
+  </tr></thead><tbody></tbody></table>
+
+  <h2 style="margin-top:32px">최근 탐지</h2>
+  <table id="detections"><thead><tr>
+    <th>시각</th><th>Agent</th><th>심각도</th><th>점수</th><th>룰</th><th>요약</th>
+  </tr></thead><tbody></tbody></table>
+</main>
+<script>
+function headers() {
+  const t = localStorage.getItem('argos_token') || '';
+  return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+function saveTokenAndLoad() {
+  localStorage.setItem('argos_token', document.getElementById('token').value);
+  load();
+}
+function fmtTs(ms) { return ms ? new Date(ms).toLocaleString('ko-KR') : '-'; }
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+async function load() {
+  const err = document.getElementById('error');
+  err.textContent = '';
+  try {
+    const [agentsRes, detRes] = await Promise.all([
+      fetch('/api/v1/agents', { headers: headers() }),
+      fetch('/api/v1/detections?limit=50', { headers: headers() }),
+    ]);
+    if (agentsRes.status === 401 || detRes.status === 401) {
+      err.textContent = '인증 실패 — 토큰을 확인하세요';
+      return;
+    }
+    const agents = await agentsRes.json();
+    const detections = await detRes.json();
+
+    document.querySelector('#agents tbody').innerHTML = agents.map(a => `
+      <tr><td>${esc(a.agent_id)}</td><td>${esc(a.hostname)}</td>
+      <td class="muted">${esc((a.tags||[]).join(', '))}</td>
+      <td>${fmtTs(a.last_seen_ms)}</td><td>${a.detection_count}</td></tr>
+    `).join('') || '<tr><td colspan="5" class="muted">등록된 에이전트 없음</td></tr>';
+
+    document.querySelector('#detections tbody').innerHTML = detections.map(d => `
+      <tr><td>${fmtTs(d.timestamp_ms)}</td><td>${esc(d.agent_id)}</td>
+      <td class="sev-${esc(d.severity)}">${esc(d.severity)}</td>
+      <td>${Math.round(d.score)}</td><td class="muted">${esc(d.rule)}</td><td>${esc(d.summary)}</td></tr>
+    `).join('') || '<tr><td colspan="6" class="muted">탐지 없음</td></tr>';
+  } catch (e) {
+    err.textContent = '로드 실패: ' + e.message;
+  }
+}
+document.getElementById('token').value = localStorage.getItem('argos_token') || '';
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>

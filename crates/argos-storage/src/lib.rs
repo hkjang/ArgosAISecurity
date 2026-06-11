@@ -3,7 +3,7 @@
 //! 에이전트(쓰기)와 CLI(읽기)가 같은 DB 파일을 공유한다. WAL 모드로
 //! 동시 읽기를 허용한다. Phase 2에서 중앙 서버 전송 큐가 추가된다.
 
-use argos_common::{Detection, FileEvent};
+use argos_common::{Detection, FileEvent, ProcessEvent};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
@@ -65,7 +65,18 @@ impl EventStore {
                 pid          INTEGER NOT NULL,
                 paths_json   TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_detections_ts ON detections(timestamp_ms);",
+            CREATE INDEX IF NOT EXISTS idx_detections_ts ON detections(timestamp_ms);
+
+            CREATE TABLE IF NOT EXISTS process_events (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp_ms INTEGER NOT NULL,
+                pid          INTEGER NOT NULL,
+                ppid         INTEGER NOT NULL,
+                uid          INTEGER NOT NULL,
+                comm         TEXT NOT NULL,
+                cmdline      TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_process_events_ts ON process_events(timestamp_ms);",
         )?;
         Ok(Self { conn })
     }
@@ -141,6 +152,51 @@ impl EventStore {
         let rows = stmt
             .query_map(params![limit as i64], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn insert_process_event(&self, e: &ProcessEvent) -> Result<(), StorageError> {
+        self.conn.execute(
+            "INSERT INTO process_events (timestamp_ms, pid, ppid, uid, comm, cmdline)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![e.timestamp_ms as i64, e.pid, e.ppid, e.uid, e.comm, e.cmdline],
+        )?;
+        Ok(())
+    }
+
+    /// 최근 프로세스 이벤트 (ts, pid, ppid, uid, comm, cmdline) — 최신순.
+    pub fn recent_processes(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(i64, u32, u32, u32, String, String)>, StorageError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT timestamp_ms, pid, ppid, uid, comm, cmdline FROM process_events
+             ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// 시간 구간 내 프로세스 이벤트 — AI 분석 근거용 (오래된 순).
+    pub fn processes_between(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, u32, u32, u32, String, String)>, StorageError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT timestamp_ms, pid, ppid, uid, comm, cmdline FROM process_events
+             WHERE timestamp_ms BETWEEN ?1 AND ?2 ORDER BY id ASC LIMIT ?3",
+        )?;
+        let rows = stmt
+            .query_map(params![from_ms, to_ms, limit as i64], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)

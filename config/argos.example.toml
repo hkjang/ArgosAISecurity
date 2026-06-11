@@ -45,6 +45,19 @@ keep_versions = 5
 # 에이전트 시작 시 기존 파일 1회 베이스라인 백업
 baseline_on_start = true
 
+[policy]
+# 서명된 정책 파일 사용 (요건서 11장 — 서명된 정책만 적용).
+# 1) argos policy gen-key  2) policy.toml 작성  3) argos policy sign policy.toml --key-file <서명키>
+# path = "/etc/argos/policy.toml"
+# pubkey = "<검증키 hex 64자>"
+path = ""
+pubkey = ""
+
+[process_monitor]
+# 프로세스 실행 감시 (/proc 폴링, Linux 전용)
+enabled = true
+interval_ms = 1000
+
 [central]
 # 중앙관리 서버 URL. 비우면 standalone 모드.
 # 예: url = "http://central.example.com:8420"

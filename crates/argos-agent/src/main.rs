@@ -31,7 +31,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let args = Args::parse();
-    let config = AgentConfig::load(&args.config)?;
+    let mut config = AgentConfig::load(&args.config)?;
+
+    // 서명된 정책 적용 (요건서 11장): 검증 실패 시 정책을 적용하지 않고
+    // argos.toml의 기존 설정으로 계속 동작한다.
+    if config.policy.is_enabled() {
+        match argos_policy::load_verified(&config.policy.path, &config.policy.pubkey) {
+            Ok(policy) => {
+                tracing::info!(version = policy.version, "서명 검증된 정책 적용");
+                config.detection = policy.detection;
+                config.response = policy.response;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "정책 서명 검증 실패 — 정책 미적용, 기존 설정 유지");
+            }
+        }
+    }
+
     tracing::info!(?config, "에이전트 시작");
 
     // 감시 경로가 없으면 만들어 둔다 (개발 환경 편의).
@@ -64,6 +80,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx) = mpsc::channel::<FileEvent>(8192);
     let _sensor = argos_sensor::spawn_sensor(config.sensor, &config.watch_paths, tx)?;
 
+    // 프로세스 감시 (Linux 전용, /proc 폴링).
+    let (proc_tx, mut proc_rx) = mpsc::channel::<argos_common::ProcessEvent>(1024);
+    #[cfg(target_os = "linux")]
+    if config.process_monitor.enabled {
+        argos_sensor::spawn_proc_monitor(config.process_monitor.interval_ms, proc_tx.clone())?;
+    }
+    // 송신단을 살려 두어 비활성/비 Linux에서도 recv가 종료되지 않게 한다.
+    let _proc_tx_keepalive = proc_tx;
+
     tracing::info!("이벤트 파이프라인 가동 (Ctrl+C로 종료)");
 
     loop {
@@ -79,6 +104,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     backup.as_ref(),
                     report_tx.as_ref(),
                 );
+            }
+            maybe_pe = proc_rx.recv() => {
+                if let Some(pe) = maybe_pe {
+                    if let Err(e) = store.insert_process_event(&pe) {
+                        tracing::error!(error = %e, "프로세스 이벤트 저장 실패");
+                    }
+                }
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("종료 시그널 수신, 에이전트 정지");
