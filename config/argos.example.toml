@@ -7,11 +7,17 @@ watch_paths = ["./watched"]
 # 로컬 이벤트/탐지 저장소
 db_path = "./argos-data/argos.db"
 
+# 센서 백엔드: "notify" (기본, 크로스 플랫폼, pid 없음)
+#             "fanotify" (Linux 전용, root 필요, 원인 pid 제공)
+sensor = "notify"
+
 [detection]
 # 행위 점수 슬라이딩 윈도우(초)
 window_secs = 10
 # 윈도우 내 이 개수 이상 파일 변경 시 대량 변경으로 가중
 mass_change_threshold = 30
+# 윈도우 내 변경 파일이 이 개수 미만이면 탐지하지 않음 (단일 파일 오탐 방지)
+min_changed_files = 5
 # 이 값 이상의 엔트로피는 암호화 의심 (0.0 ~ 8.0, 암호화 데이터는 보통 7.2+)
 entropy_threshold = 7.2
 # Detection 생성 최소 점수 (0 ~ 100)
@@ -26,3 +32,24 @@ exclude_paths = []
 # false: 탐지·로그만 (권장 초기값 — 요건서 18. 단계적 차단)
 auto_block = false
 block_score = 80.0
+
+[backup]
+# 변경 파일을 내용 주소(SHA-256) 저장소에 버전으로 보관 — argos restore의 복구 지점
+enabled = true
+# 백업 디렉터리. 반드시 감시 경로(watch_paths) 밖에 둘 것.
+dir = "./argos-data/backup"
+# 이 크기를 넘는 파일은 백업하지 않음 (bytes)
+max_file_bytes = 52428800
+# 경로당 보존 버전 수
+keep_versions = 5
+# 에이전트 시작 시 기존 파일 1회 베이스라인 백업
+baseline_on_start = true
+
+[central]
+# 중앙관리 서버 URL. 비우면 standalone 모드.
+# 예: url = "http://central.example.com:8420"
+url = ""
+# Bearer 인증 토큰 (argos-central --token 과 동일 값)
+token = ""
+# 비우면 hostname 사용
+agent_id = ""

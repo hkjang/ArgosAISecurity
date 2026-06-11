@@ -17,6 +17,19 @@ pub enum StorageError {
     Io(#[from] std::io::Error),
 }
 
+/// 탐지 1건의 전체 행 (id 포함).
+#[derive(Debug, Clone)]
+pub struct DetectionRow {
+    pub id: i64,
+    pub timestamp_ms: i64,
+    pub rule: String,
+    pub score: f64,
+    pub severity: String,
+    pub summary: String,
+    pub pid: u32,
+    pub paths: Vec<String>,
+}
+
 pub struct EventStore {
     conn: Connection,
 }
@@ -128,6 +141,80 @@ impl EventStore {
         let rows = stmt
             .query_map(params![limit as i64], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// id로 탐지 1건 조회 (CLI explain용).
+    pub fn detection_by_id(&self, id: i64) -> Result<Option<DetectionRow>, StorageError> {
+        use rusqlite::OptionalExtension;
+        let row = self
+            .conn
+            .query_row(
+                "SELECT id, timestamp_ms, rule, score, severity, summary, pid, paths_json
+                 FROM detections WHERE id = ?1",
+                params![id],
+                |r| {
+                    let paths_json: String = r.get(7)?;
+                    Ok(DetectionRow {
+                        id: r.get(0)?,
+                        timestamp_ms: r.get(1)?,
+                        rule: r.get(2)?,
+                        score: r.get(3)?,
+                        severity: r.get(4)?,
+                        summary: r.get(5)?,
+                        pid: r.get(6)?,
+                        paths: serde_json::from_str(&paths_json).unwrap_or_default(),
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// 최근 탐지의 id 목록 포함 조회 (CLI threats에서 id 노출용).
+    pub fn recent_detections_with_id(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<DetectionRow>, StorageError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, timestamp_ms, rule, score, severity, summary, pid, paths_json
+             FROM detections ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |r| {
+                let paths_json: String = r.get(7)?;
+                Ok(DetectionRow {
+                    id: r.get(0)?,
+                    timestamp_ms: r.get(1)?,
+                    rule: r.get(2)?,
+                    score: r.get(3)?,
+                    severity: r.get(4)?,
+                    summary: r.get(5)?,
+                    pid: r.get(6)?,
+                    paths: serde_json::from_str(&paths_json).unwrap_or_default(),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// 시간 구간 내 파일 이벤트 (ts, pid, action, path) — 오래된 순.
+    /// AI 분석의 근거 로그로 사용한다.
+    pub fn events_between(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, u32, String, String)>, StorageError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT timestamp_ms, pid, action, path FROM file_events
+             WHERE timestamp_ms BETWEEN ?1 AND ?2 ORDER BY id ASC LIMIT ?3",
+        )?;
+        let rows = stmt
+            .query_map(params![from_ms, to_ms, limit as i64], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)

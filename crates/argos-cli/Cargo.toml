@@ -11,4 +11,6 @@ path = "src/main.rs"
 argos-common.workspace = true
 argos-storage.workspace = true
 argos-detect.workspace = true
+argos-recovery.workspace = true
+argos-brain.workspace = true
 clap.workspace = true

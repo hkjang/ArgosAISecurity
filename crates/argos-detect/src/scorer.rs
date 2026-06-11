@@ -22,13 +22,19 @@ struct WindowEntry {
 pub struct BehaviorScorer {
     config: DetectionConfig,
     windows: HashMap<Pid, VecDeque<WindowEntry>>,
+    /// pid별 마지막 Detection (시각, 점수) — 같은 사고의 중복 탐지 억제.
+    last_emit: HashMap<Pid, (u64, f64)>,
 }
+
+/// 쿨다운 중이라도 점수가 이만큼 오르면 다시 보고한다 (사고 악화 감지).
+const ESCALATION_DELTA: f64 = 15.0;
 
 impl BehaviorScorer {
     pub fn new(config: DetectionConfig) -> Self {
         Self {
             config,
             windows: HashMap::new(),
+            last_emit: HashMap::new(),
         }
     }
 
@@ -49,10 +55,27 @@ impl BehaviorScorer {
             window.pop_front();
         }
 
+        // 단일·소수 파일 변경은 점수와 무관하게 탐지하지 않는다 (오탐 방지).
+        let changed_files: HashSet<&str> = window.iter().map(|e| e.path.as_str()).collect();
+        if changed_files.len() < self.config.min_changed_files {
+            return None;
+        }
+
         let score = Self::score(window, &self.config);
         if score < self.config.detect_score {
             return None;
         }
+
+        // 쿨다운: 같은 pid의 사고는 윈도우당 1회만 보고하되,
+        // 점수가 크게 오르면(악화) 즉시 다시 보고한다.
+        if let Some(&(last_ts, last_score)) = self.last_emit.get(&event.pid) {
+            let in_cooldown =
+                event.timestamp_ms.saturating_sub(last_ts) < self.config.window_secs * 1000;
+            if in_cooldown && score < last_score + ESCALATION_DELTA {
+                return None;
+            }
+        }
+        self.last_emit.insert(event.pid, (event.timestamp_ms, score));
 
         let distinct: HashSet<&str> = window.iter().map(|e| e.path.as_str()).collect();
         let mut paths: Vec<String> = distinct.iter().take(20).map(|s| s.to_string()).collect();
@@ -152,24 +175,37 @@ mod tests {
     fn mass_encryption_pattern_detects() {
         let config = DetectionConfig::default();
         let mut s = BehaviorScorer::new(config);
-        let mut last = None;
+        let mut best: Option<Detection> = None;
+        let mut emitted = 0usize;
         for i in 0..40u64 {
             // 짧은 시간 내 다수 파일 고엔트로피 쓰기 + 이름 변경 = 랜섬웨어 패턴.
-            last = s.observe(&event(
-                1000 + i * 10,
-                &format!("/home/file{i}.docx"),
-                FileAction::Modify,
-                Some(7.9),
-            ));
-            s.observe(&event(
-                1000 + i * 10 + 5,
-                &format!("/home/file{i}.docx.locked"),
-                FileAction::Rename,
-                None,
-            ));
+            for d in [
+                s.observe(&event(
+                    1000 + i * 10,
+                    &format!("/home/file{i}.docx"),
+                    FileAction::Modify,
+                    Some(7.9),
+                )),
+                s.observe(&event(
+                    1000 + i * 10 + 5,
+                    &format!("/home/file{i}.docx.locked"),
+                    FileAction::Rename,
+                    None,
+                )),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                emitted += 1;
+                best = Some(d);
+            }
         }
-        let d = last.expect("mass change should produce a detection");
-        assert!(d.score >= 65.0, "score {}", d.score);
+        let d = best.expect("mass change should produce a detection");
+        // 에스컬레이션 재보고는 +15 단위라 마지막 발행 점수는 detect_score+15 부근이다.
+        assert!(d.score >= 50.0, "score {}", d.score);
+        assert!(d.severity >= Severity::Medium, "severity {:?}", d.severity);
+        // 쿨다운: 80회 이벤트에 탐지가 소수만 발생해야 한다 (악화 시 재보고 포함).
+        assert!(emitted <= 5, "emitted {emitted} detections (cooldown broken)");
     }
 
     #[test]

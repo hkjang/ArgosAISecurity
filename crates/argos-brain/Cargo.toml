@@ -1,0 +1,11 @@
+[package]
+name = "argos-brain"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argos-common.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
