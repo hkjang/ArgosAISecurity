@@ -1,0 +1,14 @@
+[package]
+name = "argos-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "argos"
+path = "src/main.rs"
+
+[dependencies]
+argos-common.workspace = true
+argos-storage.workspace = true
+argos-detect.workspace = true
+clap.workspace = true

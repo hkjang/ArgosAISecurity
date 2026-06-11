@@ -1,0 +1,18 @@
+# Argos Agent systemd 서비스 (요건서 13장: systemd 기반 실행, 비정상 종료 시 자동 재시작)
+[Unit]
+Description=Argos AI Security Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/argos-agent --config /etc/argos/argos.toml
+Restart=on-failure
+RestartSec=3
+# 권한 최소화 (요건서 11장) — 차단/감시에 필요한 capability만 부여
+# 추후 CAP_SYS_PTRACE, CAP_KILL, CAP_DAC_READ_SEARCH 기반으로 세분화
+NoNewPrivileges=false
+ProtectSystem=full
+ReadWritePaths=/var/lib/argos
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[package]
+name = "argos-sensor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argos-common.workspace = true
+notify.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true

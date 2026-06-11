@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/argos-common",
+    "crates/argos-sensor",
+    "crates/argos-detect",
+    "crates/argos-storage",
+    "crates/argos-response",
+    "crates/argos-agent",
+    "crates/argos-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+notify = "6"
+toml = "0.8"
+libc = "0.2"
+
+argos-common = { path = "crates/argos-common" }
+argos-sensor = { path = "crates/argos-sensor" }
+argos-detect = { path = "crates/argos-detect" }
+argos-storage = { path = "crates/argos-storage" }
+argos-response = { path = "crates/argos-response" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

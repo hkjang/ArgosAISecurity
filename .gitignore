@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+argos-data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+argos.toml
+.env

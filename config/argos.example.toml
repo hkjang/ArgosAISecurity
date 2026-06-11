@@ -1,0 +1,28 @@
+# Argos Agent 설정 예시.
+# 이 파일을 프로젝트 루트(또는 /etc/argos/)에 argos.toml로 복사해 사용한다.
+
+# 감시 대상 경로 (재귀)
+watch_paths = ["./watched"]
+
+# 로컬 이벤트/탐지 저장소
+db_path = "./argos-data/argos.db"
+
+[detection]
+# 행위 점수 슬라이딩 윈도우(초)
+window_secs = 10
+# 윈도우 내 이 개수 이상 파일 변경 시 대량 변경으로 가중
+mass_change_threshold = 30
+# 이 값 이상의 엔트로피는 암호화 의심 (0.0 ~ 8.0, 암호화 데이터는 보통 7.2+)
+entropy_threshold = 7.2
+# Detection 생성 최소 점수 (0 ~ 100)
+detect_score = 40.0
+# 엔트로피 샘플링 크기(바이트)
+entropy_sample_bytes = 65536
+# 오탐 방지: 점수 계산 제외 경로 (백업, 로그 로테이션, DB dump 등)
+exclude_paths = []
+
+[response]
+# true: 차단 점수 초과 시 프로세스 자동 종료 (Linux 전용)
+# false: 탐지·로그만 (권장 초기값 — 요건서 18. 단계적 차단)
+auto_block = false
+block_score = 80.0

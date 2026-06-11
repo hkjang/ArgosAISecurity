@@ -1,0 +1,10 @@
+[package]
+name = "argos-storage"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argos-common.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

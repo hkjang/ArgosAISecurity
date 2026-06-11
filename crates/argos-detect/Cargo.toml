@@ -1,0 +1,8 @@
+[package]
+name = "argos-detect"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argos-common.workspace = true
+tracing.workspace = true

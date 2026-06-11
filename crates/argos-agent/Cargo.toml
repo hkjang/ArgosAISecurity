@@ -1,0 +1,19 @@
+[package]
+name = "argos-agent"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "argos-agent"
+path = "src/main.rs"
+
+[dependencies]
+argos-common.workspace = true
+argos-sensor.workspace = true
+argos-detect.workspace = true
+argos-storage.workspace = true
+argos-response.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
