@@ -1,8 +1,19 @@
-# Argos AI Security
+<p align="center">
+  <img src="docs/images/logo.svg" alt="Argos AI Security Logo" width="160" height="160" />
+</p>
 
-AI 기반 Linux 서버 보안 플랫폼 — 랜섬웨어·이상 행위·권한 상승·파일 변조를 실시간 탐지·차단·복구.
+<h1 align="center">Argos AI Security</h1>
 
-전체 제품 요건은 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md), 구조 설명은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 참고.
+<p align="center">
+  <strong>AI 기반 Linux 서버 보안 플랫폼</strong><br />
+  랜섬웨어 · 이상 행위 · 권한 상승 · 파일 변조 실시간 탐지 · 차단 · 복구
+</p>
+
+<p align="center">
+  전체 제품 요건은 <a href="docs/REQUIREMENTS.md">docs/REQUIREMENTS.md</a>, 구조 설명은 <a href="docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a> 참고.
+</p>
+
+<hr />
 
 ## 현재 상태: MVP Phase 1 + 2 + 3 핵심
 

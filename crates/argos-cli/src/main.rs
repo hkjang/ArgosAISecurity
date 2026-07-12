@@ -142,6 +142,12 @@ fn open_store(config: &AgentConfig) -> Result<EventStore, Box<dyn std::error::Er
 }
 
 fn cmd_status(config: &AgentConfig) -> CmdResult {
+    println!(r"    ___    ____   ______ ____   _____");
+    println!(r"   /   |  / __ \ / ____// __ \ / ___/");
+    println!(r"  / /| | / /_/ // / __ / / / / \__ \ ");
+    println!(r" / ___ |/ _, _// /_/ // /_/ / ___/ / ");
+    println!(r"/_/  |_|/_/ |_| \____/ \____/ /____/  AI SECURITY");
+    println!();
     println!("Argos Agent 상태");
     println!("  DB 경로     : {}", config.db_path.display());
     println!(
