@@ -146,10 +146,10 @@
 
       <nav>
         <ul class="nav-links">
-          <li><a href="#features" data-i18n="nav_features">핵심 기능</a></li>
-          <li><a href="#cli-demo" data-i18n="nav_cli">CLI 데모</a></li>
-          <li><a href="#architecture" data-i18n="nav_architecture">아키텍처</a></li>
-          <li><a href="#faq" data-i18n="nav_faq">자주 묻는 질문</a></li>
+          <li><a href="#features" data-i18n="nav_features">Key Features</a></li>
+          <li><a href="#cli-demo" data-i18n="nav_cli">CLI Demo</a></li>
+          <li><a href="#architecture" data-i18n="nav_architecture">Architecture</a></li>
+          <li><a href="#faq" data-i18n="nav_faq">Frequently Asked Questions</a></li>
         </ul>
       </nav>
 
@@ -175,7 +175,7 @@
       <div class="container">
         <div class="badge">
           <span class="badge-dot"></span>
-          <span data-i18n="hero_badge">AI 기반 Linux 서버 랜섬웨어 방어 플랫폼</span>
+          <span data-i18n="hero_badge">AI-Powered Linux Server Ransomware Defense Platform</span>
         </div>
 
         <h1 data-i18n="hero_title">
@@ -188,23 +188,23 @@
         </p>
 
         <div class="hero-cta">
-          <a href="#quickstart" class="btn-primary" data-i18n="btn_quickstart">빠른 시작 가이드</a>
-          <a href="#cli-demo" class="btn-secondary" data-i18n="btn_demo">CLI 데모 체험</a>
+          <a href="#quickstart" class="btn-primary" data-i18n="btn_quickstart">Quickstart Guide</a>
+          <a href="#cli-demo" class="btn-secondary" data-i18n="btn_demo">Try CLI Demo</a>
         </div>
 
         <!-- Metrics Bar -->
         <div class="metrics-bar">
           <div class="metric-item">
             <div class="metric-value text-gradient" data-i18n="metric_time">0ms</div>
-            <div class="metric-label" data-i18n="metric_time_label">탐지-차단 지연 시간</div>
+            <div class="metric-label" data-i18n="metric_time_label">Detection-to-Block Latency</div>
           </div>
           <div class="metric-item">
             <div class="metric-value text-gradient" data-i18n="metric_recovery">100%</div>
-            <div class="metric-label" data-i18n="metric_recovery_label">해시 검증 복구율</div>
+            <div class="metric-label" data-i18n="metric_recovery_label">Hash Verification Recovery Rate</div>
           </div>
           <div class="metric-item">
             <div class="metric-value text-gradient" data-i18n="metric_policy">Ed25519</div>
-            <div class="metric-label" data-i18n="metric_policy_label">위변조 방지 정책 서명</div>
+            <div class="metric-label" data-i18n="metric_policy_label">Tamper-Proof Policy Signatures</div>
           </div>
           <div class="metric-item">
             <div class="metric-value text-gradient" data-i18n="metric_ai">24/7</div>
@@ -332,7 +332,7 @@ Active Threats: 0 Critical | 1 Resolved</div>
       <div class="container">
         <div class="section-header">
           <span class="badge" style="background: rgba(139, 92, 246, 0.1); color: var(--accent-purple); border-color: rgba(139, 92, 246, 0.3);">Rust Workspace</span>
-          <h2 class="section-title" data-i18n="sec_arch_title">탄탄한 시스템 아키텍처</h2>
+          <h2 class="section-title" data-i18n="sec_arch_title">탄탄한 System Architecture</h2>
           <p class="section-desc" data-i18n="sec_arch_desc">독립된 Rust 크레이트 모듈화 설계로 극대화된 성능과 안전성을 제공합니다.</p>
         </div>
 
@@ -375,22 +375,22 @@ Active Threats: 0 Critical | 1 Resolved</div>
       <div class="container">
         <div class="section-header">
           <span class="badge">Quick Start</span>
-          <h2 class="section-title">빠른 시작 (Quick Start)</h2>
+          <h2 class="section-title">Quickstart (Quick Start)</h2>
           <p class="section-desc">Rust 1.75+ 환경에서 명령 몇 줄로 에이전트와 CLI를 실행할 수 있습니다.</p>
         </div>
 
         <div style="background: #090d16; border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 2rem; font-family: var(--font-mono); font-size: 0.9rem; color: #e2e8f0; overflow-x: auto;">
-          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># 1. 워크스페이스 빌드</div>
+          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># Step initialization
           <div style="color: #38bdf8; margin-bottom: 1rem;">cargo build --workspace</div>
 
-          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># 2. 에이전트 데몬 실행 (기본 설정)</div>
+          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># Step initialization
           <div style="color: #38bdf8; margin-bottom: 1rem;">cargo run -p argos-agent</div>
 
-          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># 3. 다른 터미널에서 CLI 상태 및 위협 감시</div>
+          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># Step initialization
           <div style="color: #38bdf8; margin-bottom: 1rem;">cargo run -p argos-cli -- status</div>
           <div style="color: #38bdf8; margin-bottom: 1rem;">cargo run -p argos-cli -- threats</div>
 
-          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># 4. AI Copilot 사고 분석 (ANTHROPIC_API_KEY 설정)</div>
+          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># Step initialization
           <div style="color: #38bdf8;">export ANTHROPIC_API_KEY=sk-ant-...</div>
           <div style="color: #38bdf8;">cargo run -p argos-cli -- explain 1</div>
         </div>
@@ -402,7 +402,7 @@ Active Threats: 0 Critical | 1 Resolved</div>
       <div class="container">
         <div class="section-header">
           <span class="badge">FAQ & AEO</span>
-          <h2 class="section-title" data-i18n="sec_faq_title">자주 묻는 질문 (FAQ)</h2>
+          <h2 class="section-title" data-i18n="sec_faq_title">Frequently Asked Questions (FAQ)</h2>
           <p class="section-desc" data-i18n="sec_faq_desc">Argos AI Security 도입 및 운용에 대한 주요 답변입니다.</p>
         </div>
 
@@ -474,7 +474,7 @@ Active Threats: 0 Critical | 1 Resolved</div>
         </div>
 
         <div class="footer-col">
-          <h5 data-i18n="nav_features">핵심 기능</h5>
+          <h5 data-i18n="nav_features">Key Features</h5>
           <ul class="footer-links">
             <li><a href="#features">Behavior Scoring</a></li>
             <li><a href="#features">Entropy Engine</a></li>
@@ -484,7 +484,7 @@ Active Threats: 0 Critical | 1 Resolved</div>
         </div>
 
         <div class="footer-col">
-          <h5 data-i18n="nav_architecture">아키텍처</h5>
+          <h5 data-i18n="nav_architecture">Architecture</h5>
           <ul class="footer-links">
             <li><a href="#architecture">argos-sensor</a></li>
             <li><a href="#architecture">argos-detect</a></li>
