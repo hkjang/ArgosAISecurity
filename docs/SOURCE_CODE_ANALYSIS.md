@@ -1,6 +1,6 @@
 # Argos AI Security 소스 코드 안내
 
-기준: **v0.2.0 (`0a3fc4c`), 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
+기준: **v0.3.0, 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
 
 ## 워크스페이스 입구
 
@@ -145,3 +145,19 @@ CLI의 `Command`·`PolicyAction`·`RetentionAction`은 명령 정의의 기준�
 | 네트워크 격리 | [test-isolation-netns.py](../scripts/test-isolation-netns.py)의 IPv4/IPv6 실제 패킷 시험 |
 
 릴리즈 시험은 [검증 기록](PLATFORM_VALIDATION.md)에 결과와 한계를 남긴다. 시험 통과를 초당 처리량·탐지 지연·운영 오탐률·전체 fanotify 통합 경로의 검증으로 확대 해석하지 않는다.
+
+## v0.3.0 검증 확장 파일
+
+| 경로 | 읽을 부분 |
+| --- | --- |
+| `argos-sensor/src/coverage.rs` | 등록 기준, FD 기반 경로 순회, 마운트 파싱과 검사 상한 |
+| `argos-agent/src/coverage_worker.rs` | 별도 작업자·단조 시계 나이·보호 상태 연계 |
+| `argos-cli/src/coverage.rs` | 고유 시험 파일·별도 자식·읽기 전용 DB 이벤트 확인 |
+| `argos-recovery/src/service.rs`, `service/` | 네이티브 DB 복원과 고정 검사, PostgreSQL 격리 |
+| `argos-cli/src/service_recovery.rs` | 동일 계획 전달·자식 프로세스 감독·시간 제한 |
+| `argos-vault/src/{lib,client,server}.rs` | 수신증명 형식·서명·해시, 역할별 인증·독점 객체 게시 |
+| `argos-cli/src/vault.rs` | 정상본·증거 패키지 어댑터와 새 파일 복원 |
+| `argos-policy/src/exception_audit.rs` | 예외 매칭 표본과 동일 이벤트 스냅샷의 예외 제거 재생 |
+| `argos-brain/src/validation.rs` | 근거 목록 검증·응답 JSON 인용 대조·고정 누락 안내 |
+
+구현 경계와 결과 해석은 [아키텍처 확장](ARCHITECTURE.md#v030-검증-경로와-별도-보관-경계)에 정리한다.

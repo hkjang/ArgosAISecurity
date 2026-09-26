@@ -2,7 +2,7 @@
 
 이 문서는 Argos AI Security 플랫폼의 보안 정책을 수립, 서명 및 배포하고, 전체 시스템 노드의 관제 매개변수를 제어하는 **보안 관리자(Security Administrator)**를 위한 상세 운영 매뉴얼입니다.
 
-v0.2.0 기준이다. 실제 가동·복구는 [운영자](ROLE_OPERATOR.md), 사건 근거·격리는
+v0.3.0 기준이다. 실제 가동·복구는 [운영자](ROLE_OPERATOR.md), 사건 근거·격리는
 [분석가](ROLE_ANALYST.md)와 연결한다. 이 역할 구분은 업무 안내이며 CLI의 사용자별
 RBAC 기능을 뜻하지 않는다. 로컬 설정·DB 접근은 OS 계정과 파일 권한으로 통제한다.
 
@@ -116,3 +116,7 @@ argos --config /etc/argos/argos.toml policy show
    - 에이전트가 `/api/v1/agents/register`로 등록한 뒤 `/api/v1/agents/heartbeat`로 생존·센서·재전송 상태를 보냅니다. 대시보드 조회에는 관리자 토큰을 입력합니다.
 
 중앙 관리자 토큰은 조회 권한이며 에이전트 등록·수집에 사용하지 않습니다. 에이전트 토큰은 다른 ID나 관리자 조회에 사용할 수 없습니다. 중앙 API는 원격 정책 배포·복구·프로세스 종료를 제공하지 않습니다. [중앙 서비스](SERVICE_CENTRAL.md)에 API 범위와 연결 상태 해석을 설명합니다.
+
+## v0.3.0 추가 확인
+
+예외 정리 전 [정책 예외 감사](FEATURE_EXCEPTION_AUDIT.md)의 기간·누락·예외 제거 차이를 확인한다. [보관 서버](FEATURE_REMOTE_VAULT.md)는 에이전트 업로드 토큰과 관리자 조회 토큰·서명키를 분리해 운영한다.

@@ -1,7 +1,7 @@
 # Argos 시스템·인프라 운영자 가이드
 
 운영자는 에이전트 가동, 센서·백업·전송 상태, 디스크 용량과 실제 파일 복구를 담당한다.
-이 문서는 v0.2.0 기준이다. 정책 승인·서명은 [보안 관리자](ROLE_ADMINISTRATOR.md),
+이 문서는 v0.3.0 기준이다. 정책 승인·서명은 [보안 관리자](ROLE_ADMINISTRATOR.md),
 사건 조사와 증거 인계는 [분석가](ROLE_ANALYST.md) 가이드와 연결한다.
 
 ## 설치와 설정
@@ -110,3 +110,7 @@ argos --config /etc/argos/argos.toml restore /srv/data/report.txt --before-ms 17
 사건 증거를 남겨야 하면 [사건 보존](FEATURE_RECOVERY.md#사건별-보존-고정과-해제)을 사용한다.
 정상 판정 취소와 보존 해제는 별도 작업이다. `retention release`의 승인자 문자열은
 외부 인증을 대신하지 않으며, 실제 업무 승인과 OS 파일 권한은 운영 절차로 관리한다.
+
+## v0.3.0 추가 확인
+
+보호 경로별 `coverage probe`와 [DB 복구 시험](FEATURE_SERVICE_RECOVERY.md)을 정기 절차에 포함하고, 검토된 정상본의 [외부 보관 수신증명](FEATURE_REMOTE_VAULT.md)을 보관한다.

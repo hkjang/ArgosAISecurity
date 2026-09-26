@@ -1,10 +1,10 @@
 # Argos AI Security 아키텍처
 
-기준: **v0.2.0 (`0a3fc4c`), 2026-09-27**. 이 문서는 현재 코드의 구성과 신뢰 경계를 설명한다. 제품의 장기 목표는 [요건서](REQUIREMENTS.md), 실행한 시험과 미검증 범위는 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다.
+기준: **v0.3.0, 2026-09-27**. 이 문서는 현재 코드의 구성과 신뢰 경계를 설명한다. 제품의 장기 목표는 [요건서](REQUIREMENTS.md), 실행한 시험과 미검증 범위는 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다.
 
 ## 컴포넌트와 실행 단위
 
-Rust 워크스페이스는 11개 크레이트로 구성된다. `argos-agent`, `argos-central`, `argos`가 각각 데몬·중앙 서버·CLI 실행 파일이다.
+Rust 워크스페이스는 12개 크레이트로 구성된다. `argos-agent`, `argos-central`, `argos`, `argos-vault`가 데몬·중앙 서버·CLI·보관 서버 실행 파일이다.
 
 | 크레이트 | 현재 역할 |
 | --- | --- |
@@ -18,6 +18,7 @@ Rust 워크스페이스는 11개 크레이트로 구성된다. `argos-agent`, `a
 | `argos-brain` | 설정한 Anthropic/Ollama 제공자에 조회 근거를 전달하는 AI 설명·질의 |
 | `argos-agent` | 설정·정책 활성화, 수집·판단·대응·저장 연결, Linux 설정 의미 분석, 작업자·보호 상태 관리 |
 | `argos-central` | axum API, 관리자/에이전트 인증 분리, 탐지 수집·중복 제거·생존 상태 대시보드 |
+| `argos-vault` | 별도 호스트의 추가 전용 보관 API, 역할별 토큰과 Ed25519 수신증명 |
 | `argos-cli` | 상태·근거·정책 조회, 재생, 복구·격리, AI·조회형 MCP·HTML·증거 패키지 |
 
 구체적인 함수와 파일 위치는 [소스 코드 안내](SOURCE_CODE_ANALYSIS.md)에 정리한다.
@@ -114,3 +115,13 @@ AI·MCP는 기간·PID·상한을 지정한 로컬 DB 근거를 읽는다. 종�
 eBPF/auditd·네트워크 센서, mTLS, 중앙 정책 배포·외부 승인 인증, ITSM/Suricata/Zeek 연동, Threat Graph, Kubernetes, 에이전트 자가 보호·서명 업데이트, 변경 전 스냅샷은 후속 과제다. 현재 1차 탐지는 규칙 기반이며 AI 위험도 모델·예측 성능을 구현했다고 해석하지 않는다.
 
 v0.2.0 검증 기록에는 144개 단위/회귀 테스트와 배포 바이너리의 스모크·8개 보안 시나리오가 있다. 네트워크 격리는 별도 네임스페이스의 실제 IPv4/IPv6 패킷 시험 기록이 있다. 실제 fanotify 수집부터 차단까지의 운영 전체 경로, 초당 20,000개 처리량·CPU·지연 목표, 운영 탐지율·오탐률·AI 정확도는 아직 별도 측정 대상이다. 구체적인 환경과 재현 명령은 [검증 기록](PLATFORM_VALIDATION.md)을 따른다.
+
+## v0.3.0 검증 경로와 별도 보관 경계
+
+- `coverage_worker`가 센서 등록 경로 기준을 보관하고 Linux FD 기반 순회로 접근·루트 교체·마운트 변화를 검사한다. 상한·오래된 결과·작업자 중단도 보호 상태에 포함한다. `coverage probe`는 별도 자식의 시험 파일과 DB의 새 이벤트를 대조한다. 커널 watch 전체의 인증은 아니다.
+- `service-recovery` 감독 프로세스는 한 번 파싱한 계획을 제한된 자체 작업자에 전달한다. SQLite는 Backup API, PostgreSQL은 네트워크와 쓰기 경로를 제한한 bubblewrap 안의 새 클러스터를 사용한다. 운영 DB 연결은 없고 서비스 전체 RTO/RPO는 미확인으로 남긴다.
+- `argos-vault`는 중앙 수집 서버와 독립된 보관 서버다. 업로드 토큰은 특정 에이전트에 귀속되고 조회 토큰과 분리한다. 삭제·덮어쓰기 API 없이 객체·수신증명을 동기화 저장한다. 클라이언트는 고정 공개키·요청 대상·본문 해시를 확인한다. 서버 디스크 관리자에 대한 WORM이나 자동 원격 복제는 아니다.
+- `exception_audit`는 하나의 읽기 스냅샷으로 현재 예외 매칭과 예외 제거 재생을 수행한다. 실제 배포 당시의 예외 실행 원장을 복원하지 않는다.
+- AI는 구조화된 사실·추정·미확인 항목을 받고 실제 제공한 근거 종류·ID·시각·로컬 출처와 대조한다. 인용 검사는 자연어 주장 자체의 참을 증명하지 않는다.
+
+세부 제한·상한은 [보호 공백](FEATURE_COVERAGE.md), [서비스 복구](FEATURE_SERVICE_RECOVERY.md), [원격 보관](FEATURE_REMOTE_VAULT.md), [예외 감사](FEATURE_EXCEPTION_AUDIT.md), [AI 검증](FEATURE_AI_VALIDATION.md)을 참고한다.

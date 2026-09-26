@@ -21,6 +21,12 @@ pub use trust::{
     ActivatedPolicy, ActivationError, PolicyAudit, PolicyStateSnapshot, PolicyStatus,
 };
 
+mod exception_audit;
+pub use exception_audit::{
+    audit_exceptions, ExceptionAuditOptions, ExceptionAuditReport, ExceptionPathUsage,
+    ExceptionRuleUsage, ExceptionUsage,
+};
+
 mod simulation;
 pub use simulation::{
     simulate, PolicySimulation, SimulationCoverage, SimulationDelta, SimulationError,

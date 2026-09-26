@@ -403,6 +403,24 @@ impl EventStore {
             .query_row("SELECT COUNT(*) FROM file_events", [], |r| r.get(0))?)
     }
 
+    /// 시험 이전의 마지막 ID. 시계 역전이나 과거 경로 기록을 시험 성공으로 오인하지 않는다.
+    pub fn last_file_event_id(&self) -> Result<i64, StorageError> {
+        Ok(self
+            .conn
+            .query_row("SELECT COALESCE(MAX(id),0) FROM file_events", [], |r| {
+                r.get(0)
+            })?)
+    }
+    /// 지정한 새 시험 파일의 저장된 Create/Modify 행을 확인한다. 전체 이벤트를 메모리에 읽지 않는다.
+    pub fn probe_file_event(
+        &self,
+        path: &str,
+        after_id: i64,
+    ) -> Result<Option<(i64, i64)>, StorageError> {
+        use rusqlite::OptionalExtension;
+        Ok(self.conn.query_row("SELECT id,timestamp_ms FROM file_events WHERE id>?1 AND path=?2 AND action IN ('Create','Modify') ORDER BY id LIMIT 1",params![after_id,path],|r|Ok((r.get(0)?,r.get(1)?))).optional()?)
+    }
+
     pub fn detection_count(&self) -> Result<i64, StorageError> {
         Ok(self
             .conn

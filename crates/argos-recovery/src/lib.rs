@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 mod retention;
 pub use retention::{ReleaseApproval, RetentionAuditEntry, RetentionPin};
+pub mod service;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecoveryError {

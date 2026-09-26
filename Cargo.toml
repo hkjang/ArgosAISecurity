@@ -12,10 +12,11 @@ members = [
     "crates/argos-central",
     "crates/argos-agent",
     "crates/argos-cli",
+    "crates/argos-vault",
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.86"
 
@@ -27,7 +28,7 @@ thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive", "env"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "backup", "hooks"] }
 notify = "6"
 toml = "0.8"
 libc = "0.2"
@@ -46,6 +47,7 @@ argos-response = { path = "crates/argos-response" }
 argos-recovery = { path = "crates/argos-recovery" }
 argos-policy = { path = "crates/argos-policy" }
 argos-brain = { path = "crates/argos-brain" }
+argos-vault = { path = "crates/argos-vault" }
 
 [profile.release]
 lto = "thin"

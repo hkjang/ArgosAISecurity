@@ -139,3 +139,7 @@ CLI `recovery-status`는 이 API 결과에 현재 감시 경로의 제한된 검
 `untracked_paths`는 검사에서 발견한 미기록 파일이며, `scan_truncated`는 10,000개 경로
 상한·접근 실패로 전체 범위를 확인하지 못했음을 뜻한다. `--html`은 새 파일에 보고서를
 쓰며, `--test PATH [--before-ms N]`는 정상본 복구 시험 결과를 기록한다.
+
+## v0.3.0 추가 확인
+
+파일 단위 시험 외에 [SQLite/PostgreSQL 네이티브 복구 검증](FEATURE_SERVICE_RECOVERY.md)을 제공한다. 정상본을 별도 서버에 보관하고 수신증명을 검증하려면 [원격 보관](FEATURE_REMOTE_VAULT.md)을 따른다.

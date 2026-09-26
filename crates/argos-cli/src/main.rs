@@ -1,11 +1,14 @@
 //! argos CLI: 에이전트 상태·이벤트·위협 조회, 복구, AI 분석 (요건서 14장).
 //!
-//! 구현: status, events, threats, scan, doctor, restore, explain.
-//! isolate/policy/update는 Phase 3+에서 채워진다.
+//! 보호·복구 검증, 정책 재생, 근거 조사와 명시적 격리/보관 명령을 제공한다.
+//! 자동 업데이트(`update`)는 후속 구현 대상이다.
 
+mod coverage;
 mod evidence_package;
 mod investigation;
 mod reports;
+mod service_recovery;
+mod vault;
 
 use argos_brain::ThreatExplainer;
 use argos_common::config::AgentConfig;
@@ -26,8 +29,27 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// 별도 서버 보관·서명 수신증명·새 파일 복원
+    Vault(vault::Arguments),
     /// 에이전트 상태 확인
     Status,
+    /// 감시 경로 공백 조회·지정 경로의 수집/저장 시험
+    Coverage {
+        #[command(subcommand)]
+        action: CoverageAction,
+    },
+    #[command(hide = true)]
+    CoverageProbeWrite { path: PathBuf },
+    /// 별도 작업 경로에서 DB 백업 복원·서비스 검사
+    ServiceRecovery {
+        #[command(subcommand)]
+        action: service_recovery::Action,
+    },
+    #[command(hide = true)]
+    ServiceRecoveryWorker {
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// 최근 이벤트 조회
     Events {
         #[arg(short = 'n', long, default_value_t = 20)]
@@ -209,7 +231,33 @@ enum RetentionAction {
 }
 
 #[derive(Subcommand)]
+enum CoverageAction {
+    /// 에이전트가 검사한 경로·마운트·접근 공백 상태
+    Status,
+    /// 지정 감시 디렉터리에 새 시험 파일을 쓰고 DB 도달 확인 후 정리
+    Probe {
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long, default_value_t = 10)]
+        timeout_secs: u64,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 enum PolicyAction {
+    /// 저장 근거로 승인 예외 매칭·만료·예외 제거 영향을 읽기 전용 재생
+    AuditExceptions {
+        #[arg(long)]
+        from_ms: u64,
+        #[arg(long)]
+        to_ms: u64,
+        #[arg(long, default_value_t = 100_000)]
+        max_events: usize,
+        #[arg(long, default_value_t = 24)]
+        expiring_within_hours: u64,
+    },
     /// 영구 저장된 적용 버전·최고 버전과 감사 이력 (읽기 전용)
     Status {
         #[arg(long, default_value_t = 100)]
@@ -244,6 +292,26 @@ enum PolicyAction {
 
 fn main() {
     let cli = Cli::parse();
+    if matches!(
+        &cli.command,
+        Command::ServiceRecovery { .. }
+            | Command::ServiceRecoveryWorker { .. }
+            | Command::CoverageProbeWrite { .. }
+            | Command::Vault(_)
+    ) {
+        let result = match cli.command {
+            Command::ServiceRecovery { action } => service_recovery::run(action),
+            Command::ServiceRecoveryWorker { out } => service_recovery::worker(&out),
+            Command::CoverageProbeWrite { path } => coverage::write_probe(&path),
+            Command::Vault(args) => vault::run(args, &cli.config),
+            _ => unreachable!(),
+        };
+        if let Err(error) = result {
+            eprintln!("오류: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let config = match AgentConfig::load(&cli.config) {
         Ok(config) => config,
         Err(e) => {
@@ -254,6 +322,18 @@ fn main() {
 
     let result = match cli.command {
         Command::Status => cmd_status(&config),
+        Command::Coverage { action } => match action {
+            CoverageAction::Status => coverage::status(&config),
+            CoverageAction::Probe {
+                directory,
+                timeout_secs,
+                out,
+            } => coverage::probe(&config, &directory, timeout_secs, out.as_deref()),
+        },
+        Command::CoverageProbeWrite { path } => coverage::write_probe(&path),
+        Command::ServiceRecovery { .. }
+        | Command::ServiceRecoveryWorker { .. }
+        | Command::Vault(_) => unreachable!(),
         Command::Events { limit } => cmd_events(&config, limit),
         Command::Threats { limit } => cmd_threats(&config, limit),
         Command::Scan { path } => cmd_scan(&config, &path),
@@ -875,6 +955,43 @@ fn cmd_retention(config: &AgentConfig, action: RetentionAction) -> CmdResult {
 
 fn cmd_policy(config: &AgentConfig, action: PolicyAction) -> CmdResult {
     match action {
+        PolicyAction::AuditExceptions {
+            from_ms,
+            to_ms,
+            max_events,
+            expiring_within_hours,
+        } => {
+            let baseline = if config.policy.is_enabled() {
+                argos_policy::load_active_policy(&argos_policy::policy_state_path(
+                    &config.policy,
+                    &config.db_path,
+                ))?
+            } else {
+                argos_policy::Policy {
+                    version: 0,
+                    detection: config.detection.clone(),
+                    response: config.response.clone(),
+                    ..Default::default()
+                }
+            };
+            let options = argos_policy::ExceptionAuditOptions {
+                simulation: argos_policy::SimulationOptions {
+                    from_ms,
+                    to_ms,
+                    max_events,
+                    sensor: config.sensor,
+                },
+                now_ms: argos_common::now_ms(),
+                expiring_within_ms: expiring_within_hours
+                    .checked_mul(3_600_000)
+                    .filter(|ms| *ms <= 366 * 86_400_000)
+                    .ok_or("만료 임박 범위는 최대 366일입니다")?,
+                sample_limit: 20,
+            };
+            let report = argos_policy::audit_exceptions(&open_store(config)?, &baseline, &options)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
         PolicyAction::Status { limit } => {
             let state = argos_policy::read_state(
                 &argos_policy::policy_state_path(&config.policy, &config.db_path),

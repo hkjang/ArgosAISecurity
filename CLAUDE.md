@@ -1,7 +1,7 @@
 # Argos AI Security
 
 AI 기반 Linux 서버 보안 플랫폼 (랜섬웨어 탐지·차단·복구). Rust 워크스페이스.
-현재 릴리즈: v0.2.0. 제품 목표와 미구현 요구는 docs/REQUIREMENTS.md, 실제 구현 경계는 docs/ARCHITECTURE.md와 docs/ROADMAP.md, 실행 검증 범위는 docs/PLATFORM_VALIDATION.md를 확인한다. 기능 추가 전 요건서와 현재 코드를 함께 확인한다.
+현재 릴리즈: v0.3.0. 제품 목표와 미구현 요구는 docs/REQUIREMENTS.md, 실제 구현 경계는 docs/ARCHITECTURE.md와 docs/ROADMAP.md, 실행 검증 범위는 docs/PLATFORM_VALIDATION.md를 확인한다. 기능 추가 전 요건서와 현재 코드를 함께 확인한다.
 
 ## 빌드/테스트
 
@@ -12,7 +12,7 @@ cargo run -p argos-agent              # 데몬 (argos.toml 또는 기본값)
 cargo run -p argos-cli -- status      # CLI (바이너리 이름: argos)
 ```
 
-notify 기반 개발과 비 Linux 조건부 컴파일 경계를 유지한다. v0.2.0 배포·실행 검증은 Linux x86_64 기준이다.
+notify 기반 개발과 비 Linux 조건부 컴파일 경계를 유지한다. v0.3.0 배포·실행 검증은 Linux x86_64 기준이다.
 Linux 전용 코드는 `#[cfg(target_os = "linux")]`로 격리할 것 — cfg 없이 libc 시그널/fanotify 코드를 넣지 말 것.
 
 실제 CLI·에이전트 검증은 `scripts/smoke-test.sh`, `scripts/platform-smoke.py`, `scripts/security-scenarios.py`를 사용한다. 사용자/네트워크 네임스페이스에서 격리를 검증하는 `scripts/test-isolation-netns.py`도 있다. 운영 호스트의 방화벽을 직접 바꾸는 시험으로 대체하지 않는다. 각 실행 파일 경로 지정법과 검증 한계는 검증 기록을 참고한다.
@@ -37,3 +37,7 @@ Linux 전용 코드는 `#[cfg(target_os = "linux")]`로 격리할 것 — cfg �
 - 점수 체계: 0~100. Severity 경계: 40 Medium / 65 High / 85 Critical. 변경 시 scorer.rs와 README 동기화.
 - 차단(자동 대응)은 기본 비활성(`auto_block=false`)이 정책 — 오탐으로 인한 업무 중단이 1순위 리스크 (요건서 18장).
 - 주석·로그·CLI 출력은 한국어.
+
+## 보호·복구 검증 확장
+
+`argos-vault`는 별도 추가 전용 보관 서버와 서명 수신증명 클라이언트다. 업로드/조회 토큰·고정 공개키를 분리한다. coverage_worker는 수집 경로 공백을 별도 스레드에서 검사한다. 서비스 복구는 SQLite Backup API와 bwrap PostgreSQL 새 클러스터에서만 수행하며 운영 DB 연결 옵션을 제공하지 않는다. 예외 감사는 저장 이벤트 재생이며 실제 적용 원장이 아니다. AI의 구조화 인용 검사는 주장의 의미까지 증명하지 않는다. 각 기능 문서와 추가 시나리오 스크립트를 함께 갱신한다.

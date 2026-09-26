@@ -3,6 +3,7 @@
 //! 운영 환경에서는 systemd 서비스로 실행한다 (packaging/argos-agent.service).
 
 mod backup_worker;
+mod coverage_worker;
 mod reporter;
 mod semantic;
 
@@ -61,6 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     tracing::info!(sensor = ?config.sensor, auto_block = config.response.auto_block, "에이전트 시작");
 
+    let configured_watch_paths = config.watch_paths.clone();
     // 감시 경로가 없으면 만들어 둔다 (개발 환경 편의).
     for p in &mut config.watch_paths {
         if !p.exists() {
@@ -106,6 +108,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 센서 → 파이프라인 채널. 요건서 12장 처리량 대비 버퍼는 추후 튜닝.
     let (tx, mut rx) = mpsc::channel::<FileEvent>(8192);
     let sensor = argos_sensor::spawn_sensor(config.sensor, &config.watch_paths, tx)?;
+    let coverage = if config.coverage.enabled {
+        Some(coverage_worker::CoverageWorker::spawn_registered(
+            &config.coverage,
+            config.sensor,
+            &configured_watch_paths,
+            &config.watch_paths,
+        )?)
+    } else {
+        None
+    };
 
     // 프로세스 감시 (Linux 전용, /proc 폴링).
     let (proc_tx, mut proc_rx) = mpsc::channel::<argos_common::ProcessEvent>(1024);
@@ -165,7 +177,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     use std::sync::atomic::Ordering::Relaxed;
                     w.metrics.pin_overflow.load(Relaxed)==0 && w.metrics.pin_worker_errors.load(Relaxed)==0
                 });
-                let healthy = retention_healthy && !policy_runtime.as_ref().is_some_and(|p|p["invalid"]==true) && !analysis_incomplete && semantic.unavailable_count()==0 && sensor_health.alive && sensor_health.errors == 0 && sensor_health.dropped_events == 0 && sensor_health.kernel_overflows == 0
+                let (coverage_healthy, coverage_status) = coverage.as_ref().map(|c|c.status()).unwrap_or((true,serde_json::json!({"enabled":false,"assessment":"not_checked"})));
+                let healthy = coverage_healthy && retention_healthy && !policy_runtime.as_ref().is_some_and(|p|p["invalid"]==true) && !analysis_incomplete && semantic.unavailable_count()==0 && sensor_health.alive && sensor_health.errors == 0 && sensor_health.dropped_events == 0 && sensor_health.kernel_overflows == 0
                     && process_health.as_ref().map_or(true, |h| h.alive && h.errors == 0 && h.dropped_events == 0);
                 if let Some(reporter) = &reporter { reporter.set_sensor_healthy(healthy); }
                 if !healthy { tracing::error!(?sensor_health, ?process_health, "센서 중단/이벤트 누락 — 보호 상태 저하"); }
@@ -173,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     use std::sync::atomic::Ordering::Relaxed;
                     serde_json::json!({"queued":worker.metrics.queued.load(Relaxed),"dropped":worker.metrics.dropped.load(Relaxed),"failed":worker.metrics.failed.load(Relaxed),"oversized":worker.metrics.oversized.load(Relaxed),"completed":worker.metrics.completed.load(Relaxed),"delay_ms":worker.metrics.last_delay_ms.load(Relaxed),"pin_failed":worker.metrics.pin_failed.load(Relaxed),"pin_pending":worker.metrics.pin_pending.load(Relaxed),"pin_overflow":worker.metrics.pin_overflow.load(Relaxed),"pin_completed":worker.metrics.pin_completed.load(Relaxed),"pin_worker_errors":worker.metrics.pin_worker_errors.load(Relaxed)})
                 });
-                let status = serde_json::json!({"timestamp_ms":argos_common::now_ms(),"policy":policy_runtime,"semantic_unavailable":semantic.unavailable_count(),"analysis_incomplete":analysis_incomplete,"retention_healthy":retention_healthy,"sensor_healthy":healthy,"sensor":sensor_health,"process_monitor":process_health,"sensor_queue":rx.len(),"backup":backup_health});
+                let status = serde_json::json!({"timestamp_ms":argos_common::now_ms(),"policy":policy_runtime,"coverage":coverage_status,"semantic_unavailable":semantic.unavailable_count(),"analysis_incomplete":analysis_incomplete,"retention_healthy":retention_healthy,"sensor_healthy":healthy,"sensor":sensor_health,"process_monitor":process_health,"sensor_queue":rx.len(),"backup":backup_health});
                 if let Err(error) = persist_health(&config.db_path, &status) { tracing::warn!(%error, "보호 상태 저장 실패"); }
                 if let Some(worker) = &backup {
                     use std::sync::atomic::Ordering::Relaxed;

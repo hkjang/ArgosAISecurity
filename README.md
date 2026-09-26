@@ -15,13 +15,21 @@
 
 <hr />
 
-## 현재 릴리즈: v0.2.0
+## 현재 릴리즈: v0.3.0
 
-[v0.2.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.2.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.2.0.md)
+[v0.3.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.3.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.3.0.md)
 
-2026-09-27 기준, 정책 재사용 방지·다중 시간 구간 탐지·Linux 설정 의미 감시·사건별 복구 지점 보존·증거 패키지를 제공합니다. 자동 차단은 기본 비활성이며 다중 시간 구간과 내용 표본 분석은 선택 활성화합니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
+2026-09-27 기준, 기존 탐지·정책 신뢰·정상본 보존에 **보호 경로 공백 검사, SQLite/PostgreSQL 복구 검증, 원격 보관 수신증명, 승인 예외 감사, AI 인용 검사**를 추가했습니다. 자동 차단은 기본 비활성입니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
 
-워크스페이스 테스트 **144개**, 배포용 바이너리의 보안 시나리오 **8개**와 탐지·복구·인증 시험을 통과했습니다. 이는 운영 탐지율·성능 인증이 아니며 [검증 기록](docs/PLATFORM_VALIDATION.md)에 시험 범위를 구분했습니다.
+워크스페이스 테스트 **188개**와 별도 PostgreSQL 시험이 통과했습니다. 실제 CLI·에이전트 시나리오의 결과·환경·미검증 범위는 [검증 기록](docs/PLATFORM_VALIDATION.md)에 정리합니다. PostgreSQL 드릴에는 별도 PostgreSQL 설치와 Linux bubblewrap이 필요합니다.
+
+| 추가 기능 | 시작 명령·안내 |
+| --- | --- |
+| 보호 공백과 이벤트 전달 | `coverage status`, `coverage probe` — [범위·제약](docs/FEATURE_COVERAGE.md) |
+| 네이티브 DB 복구 시험 | `service-recovery test --plan PLAN --out NEW_DIR` — [SQLite/PostgreSQL](docs/FEATURE_SERVICE_RECOVERY.md) |
+| 별도 서버 보관·서명 수신증명 | `vault upload-backup`, `vault upload-evidence`, `vault fetch` — [보관 서버](docs/FEATURE_REMOTE_VAULT.md) |
+| 정책 예외 감사 | `policy audit-exceptions` — [저장 이벤트 재생과 예외 제거 비교](docs/FEATURE_EXCEPTION_AUDIT.md) |
+| AI 답변 근거 검사 | `ask`, `explain` — [구조화된 인용 검사와 한계](docs/FEATURE_AI_VALIDATION.md) |
 
 | 구성 요소 | 크레이트 | 상태 |
 | --- | --- | --- |
@@ -36,6 +44,7 @@
 | 백업·복구 | `argos-recovery` | 정상본 판정·미리보기·복구 시험, 사건별 보존과 승인 해제 |
 | 정책 신뢰·재생 | `argos-policy` | Ed25519, 버전·기간·대상·키 ID, 감사 기록·승인 롤백·과거 이벤트 비교 |
 | AI Threat Summary / Copilot | `argos-brain` | Anthropic/Ollama, 기간·PID별 근거 및 조회 누락 표시 |
+| 원격 보관 서버 | `argos-vault` | 추가 전용 API, 역할별 토큰·Ed25519 수신증명·고정 키 검증 |
 | 중앙관리 서버 + 대시보드 | `argos-central` | 인증된 등록·수집·조회, 생존 신호·전달 중복 제거 |
 | CLI | `argos-cli` | 운영 조회·복구·정책·조사, 조회형 MCP, HTML 보고서·증거 패키지 |
 
@@ -187,7 +196,7 @@ argos mcp # 설정한 단일 호스트 DB를 조회하는 stdio MCP 서버
 
 | 목적 | 문서 |
 | --- | --- |
-| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.2.0 변경 사항](docs/releases/v0.2.0.md) |
+| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.3.0 변경 사항](docs/releases/v0.3.0.md) |
 | 일상 운영·사고 조사 | [운영자](docs/ROLE_OPERATOR.md), [분석가](docs/ROLE_ANALYST.md), [관리자](docs/ROLE_ADMINISTRATOR.md) |
 | 명령·서비스 설정 | [CLI](docs/SERVICE_CLI.md), [에이전트](docs/SERVICE_AGENT.md), [중앙 서버](docs/SERVICE_CENTRAL.md) |
 | 구현과 후속 요구 | [아키텍처](docs/ARCHITECTURE.md), [코드 분석](docs/SOURCE_CODE_ANALYSIS.md), [요건서](docs/REQUIREMENTS.md), [로드맵](docs/ROADMAP.md) |

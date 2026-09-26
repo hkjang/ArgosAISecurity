@@ -65,3 +65,7 @@ argos --config /etc/argos/argos.toml policy status --limit 100
 `pin_pending`은 현재 대기 건수다. 완료 건수는 성공 처리한 요청 수이며 고정한 파일·
 버전 수가 아니다. `pin_worker_errors`는 현재 작업자 실행 중 오류 계수다. 과거 실패
 횟수가 남더라도 재시도로 완료될 수 있으므로 대기 건수·실제 보존 참조와 함께 본다.
+
+## v0.3.0 추가 확인
+
+경로 접근·루트 교체·하위 마운트·검사 상한은 [보호 공백 검사](FEATURE_COVERAGE.md)로 확인한다. 시험 파일의 DB 수신은 `coverage probe`로 별도 검사한다.

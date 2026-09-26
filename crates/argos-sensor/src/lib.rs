@@ -13,6 +13,7 @@ use notify::{Event as NotifyEvent, EventKind, RecommendedWatcher, RecursiveMode,
 use std::path::PathBuf;
 use tokio::sync::mpsc::Sender;
 
+pub mod coverage;
 mod health;
 use health::SensorHealth;
 pub use health::SensorHealthSnapshot;

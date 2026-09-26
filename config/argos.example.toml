@@ -11,6 +11,14 @@ db_path = "./argos-data/argos.db"
 #             "fanotify" (Linux 전용, root 필요, 원인 pid 제공)
 sensor = "notify"
 
+# 별도 작업자로 경로 접근·루트 교체·마운트 변경·검사 누락을 확인한다.
+# no_observed_gap은 전체 이벤트 전달 성공의 증명이 아니다.
+# 실제 전달 시험: argos coverage probe --directory <보호 경로 안의 0700 시험 디렉터리>
+[coverage]
+enabled = true
+interval_secs = 30
+max_entries = 10000
+
 [detection]
 # 행위 점수 슬라이딩 윈도우(초)
 window_secs = 10

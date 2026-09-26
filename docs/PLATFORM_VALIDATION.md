@@ -1,6 +1,6 @@
 # 검증 가능한 보안 플랫폼: 구현과 검증 기록
 
-기준: `v0.2.0`과 이전 릴리즈 검증 기록. v0.2.0 릴리즈 검증일: 2026-09-27, v0.1.0 검증일: 2026-09-26. 자동 차단 기본값은 계속 비활성이다.
+기준: `v0.3.0`과 이전 릴리즈 검증 기록. v0.3.0 검증일: 2026-09-27. v0.2.0 릴리즈 검증일: 2026-09-27, v0.1.0 검증일: 2026-09-26. 자동 차단 기본값은 계속 비활성이다.
 
 ## 구현 범위
 
@@ -18,6 +18,39 @@
 | 인증/격리 | 운영 관리자/개별 에이전트 토큰 필수, loopback 개발 모드, 비밀값 마스킹, 명시적 관리 IP·방향·포트만 허용, IPv4/IPv6 INPUT/OUTPUT/FORWARD 제한 |
 | 조사 | 기간·PID 기반 근거 조회, 조회 누락·근거 ID, Anthropic/Ollama 설정, 조회형 MCP, 시간순 재생 HTML, 복구 준비도 HTML |
 | 증거 패키지 | 기본 문자열 마스킹, 사건 근거·대응 이력·수락 정책 스냅샷, SHA-256 manifest 및 파일 목록 검증 |
+
+## v0.3.0 보호·복구·근거 검증
+
+- `cargo test --workspace --offline --locked`: **188개 통과**, PostgreSQL 도구가 필요한 선택 시험 1개는 별도 실행했다. 해당 PostgreSQL 18.6 시험도 통과했다. 기본 회귀 시험은 외부 모델·운영 DB를 사용하지 않는다.
+- `cargo build --release --workspace --offline --locked` 성공. 최종 최적화 바이너리의 기존 스모크·보안 및 신규 보호/보관/DB 시나리오를 실행했다. `argos --version`은 `argos 0.3.0`이다. 네 실행 파일의 최대 요구 glibc는 2.39다.
+- `coverage` 코어/작업자: 등록 경로 일치·루트/별칭 교체·접근·마운트 범위/중첩·심볼릭 링크·검사 예산·오래된 결과·작업자 종료를 검사했다. 실제 notify 시험 파일은 새 DB 이벤트와 경로·내용·정리 결과를 대조했다.
+- 예외 감사: 같은 저장 스냅샷, 신원·기간·경로·실행 파일·유효 UID, 겹치는 예외 우선순위, 규칙별 매칭·집계·미끼 파일 유지, 표본/조회 누락을 검사했다. 합성 승인 이벤트 2건의 예외 제거 재생에서 알림 0→1과 해당 신원의 예상 차단 증가를 확인했다. 운영 오탐률 측정은 아니다.
+- AI: 두 제공자의 모의 HTTP 응답과 실제 Ollama 경로의 `ask` CLI로 정상 인용 수락, 없는 ID·종류·출처·시각 불일치, 범위 밖 입력, JSON/크기 상한, 누락 표시를 확인했다. 실제 외부 모델 호출·한국어 분석 품질 평가는 수행하지 않았다.
+- 보관: 실제 loopback HTTP에서 역할/에이전트 분리·DELETE/PUT 거부, 고정 키·본문/메타데이터 변조·redirect 거부, 재전송 및 서버 재시작 후 동일 수신증명, 원본 삭제 후 검증 복원을 검사했다. 별도 호스트의 TLS 배포·디스크 관리자 공격·WORM 검증은 아니다.
+- DB 복구: SQLite Backup API와 PostgreSQL 18.6 custom 아카이브를 별도 작업 경로에 복원했다. 스키마·최소 행 수·제약·쓰기/읽기/롤백, 원본 불변, 기존 출력·SQL 식별자·실행 중 SQLite sidecar 거부, 비밀값 비노출, 타임아웃 및 서버 정리를 검사했다. PostgreSQL 도구는 호스트 설치를 변경하지 않고 `/tmp`에 패키지를 추출해 사용했다.
+
+### CLI 통합 시나리오
+
+| 스크립트 | 실행 범위 |
+| --- | --- |
+| `smoke-test.sh`, `platform-smoke.py` | 실제 파일 변경·탐지·정상본 복구, 중앙 인증/수집/중복 제거·생존 신호, MCP·HTML |
+| `security-scenarios.py` | 기존 Linux 의미·프로세스·보존·정책 신뢰 등 8개 시나리오 |
+| `assurance-scenarios.py` | 실제 notify 전달·루트 교체·수집 중단, 예외 제거 재생, AI 인용 수락/거부 5개 |
+| `vault-scenarios.py` | 실제 CLI의 감사 파일·정상본·증거 패키지 업로드/원본 삭제/복원, 변조 거부 4개 |
+| `service-recovery-scenarios.py --pg-root ROOT` | SQLite/PostgreSQL 네이티브 복구·실패·타임아웃 등 15개 검사 |
+
+```bash
+cargo test --workspace --offline --locked
+cargo build --release --workspace --offline --locked
+python3 scripts/assurance-scenarios.py --bin-dir target/release --report /tmp/argos-assurance.json
+python3 scripts/vault-scenarios.py --bin-dir target/release --report /tmp/argos-vault.json
+python3 scripts/service-recovery-scenarios.py --bin-dir target/release --pg-root /path/to/trusted/postgresql/root
+ARGOS_TEST_POSTGRES_ROOT=/path/to/trusted/postgresql/root cargo test -p argos-recovery --offline --locked -- --ignored
+```
+
+`--report`는 존재하지 않는 새 파일을 지정한다. PostgreSQL 도구가 없으면 서비스 시나리오에서 `--pg-root`를 생략해 SQLite만 검사한다. PostgreSQL은 신뢰한 도구·일반 사용자·작동하는 bubblewrap이 필요하며, 없을 때 호스트 DB 실행으로 대체하지 않는다. namespace·시간/파일/출력/작업량 상한은 VM이나 디스크 quota를 대신하지 않는다. 커널 I/O 정지 상태의 프로세스가 SIGKILL 직후 소멸한다고 보장하지 않는다.
+
+프로브 성공은 한 파일의 전달, DB 성공은 계획한 DB 검사, 수신증명은 지정 키의 보관 수락, AI 검사는 인용 형식/존재를 확인한 결과다. 전체 감시·서비스 RTO/RPO·서버 관리자 삭제 방지·AI 문장 의미의 참으로 확대 해석하지 않는다.
 
 ## 기존 v0.1.0 실행 결과
 

@@ -36,6 +36,7 @@ pub struct AgentConfig {
     pub process_monitor: ProcessMonitorConfig,
     pub ai: AiConfig,
     pub semantic: SemanticConfig,
+    pub coverage: CoverageConfig,
 }
 
 impl Default for AgentConfig {
@@ -52,6 +53,26 @@ impl Default for AgentConfig {
             process_monitor: ProcessMonitorConfig::default(),
             ai: AiConfig::default(),
             semantic: SemanticConfig::default(),
+            coverage: CoverageConfig::default(),
+        }
+    }
+}
+
+/// 감시 경로의 접근·교체·마운트 변경을 제한된 읽기 전용 검사로 확인한다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CoverageConfig {
+    pub enabled: bool,
+    pub interval_secs: u64,
+    pub max_entries: usize,
+}
+
+impl Default for CoverageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 30,
+            max_entries: 10_000,
         }
     }
 }

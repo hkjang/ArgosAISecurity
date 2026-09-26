@@ -166,8 +166,9 @@ fn read_file(path: &Path) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-pub fn verify(directory: &Path) -> Result<()> {
-    let manifest: Value = serde_json::from_slice(&read_file(&directory.join("manifest.json"))?)?;
+pub(crate) fn snapshot(directory: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    let manifest_bytes = read_file(&directory.join("manifest.json"))?;
+    let manifest: Value = serde_json::from_slice(&manifest_bytes)?;
     if manifest["format"] != "argos-evidence-v1" {
         return Err("지원하지 않는 패키지 형식".into());
     }
@@ -180,6 +181,7 @@ pub fn verify(directory: &Path) -> Result<()> {
     {
         return Err("예상한 증거 파일 목록과 다름".into());
     }
+    let mut snapshot = BTreeMap::new();
     for (name, info) in files {
         let bytes = read_file(&directory.join(name))?;
         if info["size_bytes"].as_u64() != Some(bytes.len() as u64)
@@ -187,10 +189,17 @@ pub fn verify(directory: &Path) -> Result<()> {
         {
             return Err(format!("증거 파일 무결성 검증 실패: {name}").into());
         }
+        snapshot.insert(name.clone(), bytes);
     }
     if fs::read_dir(directory)?.count() != 3 {
         return Err("manifest에 없는 추가 파일 존재".into());
     }
+    snapshot.insert("manifest.json".into(), manifest_bytes);
+    Ok(snapshot)
+}
+
+pub fn verify(directory: &Path) -> Result<()> {
+    snapshot(directory)?;
     println!("증거 패키지 SHA-256 검증 성공: {}", directory.display());
     Ok(())
 }

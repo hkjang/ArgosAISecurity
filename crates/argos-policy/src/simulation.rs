@@ -3,7 +3,7 @@
 use crate::Policy;
 use argos_common::{config::SensorKind, FileAction, Pid};
 use argos_detect::{validate_configuration, DetectionEngine, Evaluation};
-use argos_storage::{EventStore, FileEventRow, StorageError};
+use argos_storage::{EventStore, FileEventRange, FileEventRow, StorageError};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -135,6 +135,17 @@ pub fn simulate(
     candidate: &Policy,
     options: &SimulationOptions,
 ) -> Result<SimulationReport, SimulationError> {
+    let range = load_simulation_range(store, baseline, candidate, options)?;
+    simulate_range(&range, baseline, candidate, options)
+}
+
+/// 정책 비교와 예외 사용 재생이 공유하는 제한된 단일 읽기 스냅샷.
+pub(crate) fn load_simulation_range(
+    store: &EventStore,
+    baseline: &Policy,
+    candidate: &Policy,
+    options: &SimulationOptions,
+) -> Result<FileEventRange, SimulationError> {
     if options.from_ms > options.to_ms || options.to_ms > i64::MAX as u64 {
         return Err(SimulationError::InvalidOptions(
             "시작 ≤ 종료 ≤ i64::MAX여야 합니다".into(),
@@ -145,6 +156,31 @@ pub fn simulate(
             "조회 제한은 1~1,000,000건이어야 합니다".into(),
         ));
     }
+    // 대량 과거 자료를 읽기 전에 잘못된 정책을 거부한다.
+    for (name, policy) in [("기존", baseline), ("후보", candidate)] {
+        validate_configuration(&policy.detection, &policy.response, options.sensor).map_err(
+            |reason| SimulationError::InvalidPolicy {
+                policy: name,
+                reason,
+            },
+        )?;
+    }
+    let warmup_ms = policy_window_secs(baseline)
+        .max(policy_window_secs(candidate))
+        .saturating_mul(1000);
+    Ok(store.file_events_in_range(
+        options.from_ms.saturating_sub(warmup_ms),
+        options.to_ms,
+        options.max_events,
+    )?)
+}
+
+pub(crate) fn simulate_range(
+    range: &FileEventRange,
+    baseline: &Policy,
+    candidate: &Policy,
+    options: &SimulationOptions,
+) -> Result<SimulationReport, SimulationError> {
     let mut warnings = vec![
         "저장된 이벤트의 비교 결과입니다. 실제 차단 이후의 이벤트 변화·차단 성공 여부는 예측하지 않습니다.".into(),
         "DB에 센서 종류가 없어 지정한 센서를 사용합니다. 프로세스 시작 시각·부팅 ID가 없는 이벤트는 PID 재사용을 구별하거나 자동 차단할 수 없습니다.".into(),
@@ -167,7 +203,6 @@ pub fn simulate(
         .max(policy_window_secs(candidate))
         .saturating_mul(1000);
     let warmup_from_ms = options.from_ms.saturating_sub(warmup_ms);
-    let range = store.file_events_in_range(warmup_from_ms, options.to_ms, options.max_events)?;
     if baseline.detection.content_sampling.enabled || candidate.detection.content_sampling.enabled {
         if range.events.iter().any(|row| row.event.content.is_none()) {
             warnings.push("일부 과거 이벤트에 다중 위치 표본이 없습니다. 현재 파일로 보완하지 않으며 부분 암호화 비교 근거가 불완전합니다.".into());
