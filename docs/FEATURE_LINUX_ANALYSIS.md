@@ -5,10 +5,14 @@
 `watch_paths` 안의 파일을 `[semantic].files`에 절대 경로로 명시한다. 지원 대상은 `authorized_keys`/`authorized_keys2`, `sudoers`와 `sudoers.d` 파일, `crontab`/`cron.d`/cron 스풀 파일, systemd `.service`/`.timer`/`.socket` 및 해당 drop-in `.conf`다.
 
 ```toml
+watch_paths = ["/etc"]  # 기존 감시 경로에 필요한 범위를 포함한다.
+
 [semantic]
 files = ["/etc/sudoers", "/etc/systemd/system/example.service"]
 max_file_bytes = 262144
 ```
+
+기본 지정 파일 목록은 비어 있으므로 설정하지 않으면 이 의미 분석은 동작하지 않는다. `max_file_bytes` 기본값은 262,144바이트다.
 
 시작 시 현재 내용을 비교 기준으로 관측한다. 기준은 정상 판정이나 백업 인증이 아니다. 이후 파일 이벤트에서 다음 의미를 별도 탐지로 기록한다.
 
@@ -43,3 +47,17 @@ python3 scripts/security-scenarios.py --bin-dir target/debug --report /tmp/argos
 ```
 
 시험은 임시 파일·자식 프로세스를 사용한다. 운영 SSH·sudo·cron·systemd 설정을 수정하지 않는다.
+
+
+## 관측 결과 확인
+
+```bash
+argos --config /etc/argos/argos.toml threats -n 30
+argos --config /etc/argos/argos.toml evidence --from-ms 1760000000000 --to-ms 1760000600000 --pid 1234 --limit 1000
+argos --config /etc/argos/argos.toml status
+```
+
+시각과 PID는 실제 조사 대상으로 바꾼다. `threats`의 `linux.*` 규칙으로 파일 의미
+변화를 찾고, 프로세스 자격은 `processes.rows[].event.credentials`에서 확인한다.
+`argos processes`의 표는 유효 UID만 표시한다. `health.semantic_*`나 로컬
+`semantic_unavailable`가 있으면 기준·현재 관측 누락도 조사한다.

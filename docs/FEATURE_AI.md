@@ -28,6 +28,8 @@ argos evidence --from-ms 1760000000000 --to-ms 1760086400000 --limit 1000
 
 질문의 `지난/최근 N시간/N분/N일`, `last N hours/minutes/days`를 해석한다. 기간이 없으면 최근 24시간임을 표시한다. `어제` 등 달력 기준 표현은 명시적 epoch ms 구간을 요구한다. 복잡한 자연어 기간 해석기는 아니므로 정확한 조사에는 `--from-ms/--to-ms`를 사용한다.
 
+시간 값은 Unix epoch 밀리초다. 예제 값은 조사 기간으로 바꾼다. `--pid`는 숫자 PID 필터이므로 같은 PID의 다른 시작 ticks·boot ID가 함께 반환될 수 있다.
+
 조회는 시작·종료를 포함하며, 각각 파일·탐지·프로세스의 전체 건수/반환 건수/`truncated`를 같은 읽기 스냅샷에서 계산한다. 상한은 종류별 1~10,000건이고 결과는 시각·ID 순이다. AI 프롬프트에도 구간과 누락을 전달하며, CLI가 모델 호출 전에 범위를 별도로 출력한다. 저장되지 않은 이벤트는 복원할 수 없다. 개별 테이블 ID가 겹칠 수 있으므로 `files.id`, `detections.id`, `processes.id`를 구분한다.
 
 `ask`의 서버 범위는 현재 설정의 로컬 DB다. 여러 서버의 중앙 비교나 자연어에 등장하는 다른 서버로 자동 전환하지 않는다. 이벤트·경로·명령행 안의 지시는 신뢰할 수 없는 데이터로 취급하도록 프롬프트에 명시한다.
@@ -50,3 +52,20 @@ argos incident 42 --window-secs 300 --limit 1000 --html /tmp/incident-42.html
 
 `explain ID`도 지정 탐지 앞 탐지 윈도우와 뒤 5초의 기간 조회·누락 표시를 사용한다.
 `evidence`/MCP에는 `response_results`가 추가된다. 대응 감사 조회는 같은 기간으로 별도 읽기 스냅샷을 열며, 종류별 상한과 누락을 함께 표시한다. `ask`/`explain`은 실제 대응 결과도 모델에 전달한다.
+
+
+## 자격 근거와 자료 인계
+
+`processes.rows[].event.credentials`는 네 가지 UID/GID와 capability 관측이다.
+`files.rows[].event.process.ancestors`는 수집 시 확인한 제한된 부모 계보이며,
+`files.rows[].event.content`는 선택적 다중 위치 표본과 이전 관찰 대비 차이다.
+미수집 값은 `null`/빈 목록으로 남는다. 자세한 형식과 한계는
+[Linux 분석](FEATURE_LINUX_ANALYSIS.md), [탐지](FEATURE_DETECTION.md)를 따른다.
+
+AI 호출에는 선택한 근거의 경로·명령행 등 원문이 포함될 수 있다. `evidence-export`의
+기본 마스킹이 `ask`/`explain`에도 자동 적용되는 것은 아니다. 공급자·주소와 전송할
+조사 범위를 확인한다. AI 없이 자료를 인계하려면 [증거 패키지](FEATURE_EVIDENCE_PACKAGE.md)를 사용한다.
+
+`explain`이 사용하는 설정은 서명 정책 사용 시 마지막 수락 정책, 미사용 시 로컬
+설정이다. 사건 이후 정책이 바뀌었다면 사건 당시의 탐지 창과 다를 수 있으므로
+`ask --from-ms ... --to-ms ...`로 조사 기간을 직접 지정한다.

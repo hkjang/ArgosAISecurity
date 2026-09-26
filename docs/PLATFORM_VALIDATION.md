@@ -7,12 +7,17 @@
 | 영역 | 구현 |
 | --- | --- |
 | 자동 차단 | fanotify/notify별 점수, 도달 불가 경고, 매 이벤트 대응 판단, 알림 억제 분리, PID·시작 ticks·부팅 ID 확인, pidfd 신호와 종료 확인, 결과 감사 |
+| 확장 탐지 | 선택적 10/60/600초 인스턴스·계정·경로·계보 집계, 총 읽기 예산 안의 앞·중간·끝 표본, 근거 상한·누락 표시 |
+| Linux 분석 | 지정한 SSH 키·sudoers·cron·systemd 파일의 의미·순서·권한 변화, /proc 실행 이미지·UID/GID·capability 및 부모 신원 근거 |
 | 정상 작업 | 시간·경로·실행 파일·유효 UID·완전한 프로세스 신원이 모두 맞는 승인 작업만 해당 규칙 조정. 미끼 파일 변경은 별도 95점 신호 |
-| 안전한 복구 | 기존/baseline은 미검토로 시작. 정상 판정·취소·공격 이전 추천·원본 유지 미리보기·복구 시험·정상본 보존. UID/GID 보존과 특수 권한 제거 |
+| 안전한 복구 | 새 baseline과 정상 판정 이력이 없는 백업은 미검토로 시작. 기존 v0.1.0 정상 판정은 유지. 정상 판정·취소·공격 이전 추천·원본 유지 미리보기·복구 시험, UID/GID 보존과 특수 권한 제거 |
+| 사건 보존 | 정상본 판정과 독립된 다중 사건 참조·승인 해제·감사 이력, 정리 제외, 별도 영속 요청 큐와 작업자 |
 | 정책 사전 검증 | 저장된 엔트로피/프로세스 맥락을 재생, 기존/후보 차이·예상 대상·근거 ID·누락 표시, 신원별 대상 비교. 실제 정책/프로세스 변경 없음 |
+| 정책 신뢰 | 동일 바이트 검증·파싱, 로컬 신뢰 키와 버전·기간·대상 검사, 수락 상태·최대 버전·감사 원자적 저장, 새 버전 승인 롤백 |
 | 운영 신뢰성 | 감시/백업 제한 큐와 누락 지표, 별도 백업 작업자, 논리 파일 바이트 기준 처리 예산, 생존 신호, 디스크 outbox, 재전송과 전달 ID 중복 제거 |
 | 인증/격리 | 운영 관리자/개별 에이전트 토큰 필수, loopback 개발 모드, 비밀값 마스킹, 명시적 관리 IP·방향·포트만 허용, IPv4/IPv6 INPUT/OUTPUT/FORWARD 제한 |
 | 조사 | 기간·PID 기반 근거 조회, 조회 누락·근거 ID, Anthropic/Ollama 설정, 조회형 MCP, 시간순 재생 HTML, 복구 준비도 HTML |
+| 증거 패키지 | 기본 문자열 마스킹, 사건 근거·대응 이력·수락 정책 스냅샷, SHA-256 manifest 및 파일 목록 검증 |
 
 ## 기존 v0.1.0 실행 결과
 
@@ -27,7 +32,7 @@
 - 복구 시험: 기존 소유권 유지, `06755 → 0755`, 신규 파일 `0600`, 원본 심볼릭 링크 거부.
 - `git diff --check`, 변경 Rust 파일 포맷, 보고서 JavaScript 문법 검사 통과.
 
-## 정책 신뢰·Linux 분석 확장 검증
+## v0.2.0 정책 신뢰·Linux 분석 검증
 
 - `cargo test --workspace --offline --locked`: **144개 단위/회귀 테스트 통과**. `cargo build --release --workspace --offline --locked` 성공.
 - v0.2.0 배포용 최적화 바이너리로 `scripts/smoke-test.sh`, `scripts/platform-smoke.py`, `scripts/security-scenarios.py`를 실행해 모두 통과했다. `argos --version`은 `argos 0.2.0`이며 패키지의 최대 요구 glibc 버전은 2.39다.
@@ -41,6 +46,24 @@
 
 외부 승인자 인증, 완전한 Linux 유효 설정 평가, 사건 당시 실제 실행 정책 증명, 실행 파일 해시/패키지 신뢰, 서비스 영향 및 CPU/디스크 기반 자동 축소는 이 구현의 완료 범위가 아니다. 서명 정책 상태와 백업 저장소는 로컬 관리자/root에 대한 별도 외부 보존 경계를 제공하지 않는다.
 
+## 배포 산출물 검증
+
+[v0.2.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.2.0)의 태그와 `BUILD_INFO.json`은 소스 커밋 `0a3fc4c38d1d76d02464bf57adbe6e33f794fdfa`를 가리킨다. 패키지 내 실행 파일별 해시·크기, CLI 버전, 도움말 실행, 문서·설정·시험 스크립트 포함을 확인했다. 업로드한 파일을 다시 내려받아 `SHA256SUMS`와 일치함을 확인했다.
+
+`argos-v0.2.0-linux-x86_64-gnu.tar.gz`의 SHA-256:
+
+```text
+a44819e6a9a4aa3e5b81bc89ff88bbbecc24adc00ebefe603a4730b897109a6a
+```
+
+실행 파일 요구 glibc는 `argos` 2.39, `argos-agent`·`argos-central` 2.34이므로 패키지는 **glibc 2.39 이상**을 요구한다. 바이너리 설치와 설정 이전은 [설치 안내](INSTALL_BINARY.md)를 따른다. 이후 `main` 문서 갱신은 발행된 태그·압축 파일을 변경하지 않는다.
+
+## 릴리즈 이후 문서 점검 (2026-09-27)
+
+README·설치·역할별 운영·기능·구조 문서를 v0.2.0 코드 및 배포 바이너리의 도움말과 대조했다. Markdown/HTML 상대 링크·앵커, TOML 예제, 사이트 JSON-LD·언어별 번역 키, `node --check docs/app.js`를 확인했다. 한국어·영어 CLI 데모의 5개 탭·FAQ·모바일 메뉴는 DOM 모의 실행으로 검사했으며 실제 브라우저의 시각 검사는 수행하지 않았다.
+
+이 점검은 문서와 정적 사이트 변경에 대한 검증이다. 위 144개 테스트·8개 시나리오는 v0.2.0 릴리즈 바이너리 검증 결과이며, 문서 갱신으로 운영 탐지율이나 지원 플랫폼 범위가 확대되지는 않는다.
+
 ## 재현
 
 ```bash
@@ -53,6 +76,15 @@ python3 scripts/test-isolation-netns.py --argos target/debug/argos
 ```
 
 기본 target 디렉터리가 쓰기 불가인 현재 환경에서는 `CARGO_TARGET_DIR=/tmp/argos-recovery-target`을 사용했다. Python 시험에 해당 `--bin-dir`/`--argos` 경로를 지정한다. 격리 시험은 `unshare`, `ip`, `iptables`/`ip6tables` 계열 도구와 사용자 네임스페이스 지원이 필요하다. 설치되지 않은 도구는 시험 시 `/tmp`에만 추출해 사용했다.
+
+소스에서 배포용 최적화 바이너리를 검증하려면 다음처럼 실행한다. `--report`의 출력 파일은 새 경로여야 한다.
+
+```bash
+cargo build --release --workspace --locked
+ARGOS_BIN_DIR="$PWD/target/release" sh scripts/smoke-test.sh
+python3 scripts/platform-smoke.py --bin-dir target/release
+python3 scripts/security-scenarios.py --bin-dir target/release --report /tmp/argos-release-scenarios.json
+```
 
 ## 도입 순서와 후속 검증
 

@@ -1,83 +1,127 @@
-# Argos CLI (관리자 명령행 도구) 상세 분석서
+# Argos CLI 명령 가이드
 
-**Argos CLI**(`argos-cli`)는 관리자가 Argos 에이전트의 작동 상태를 즉각 모니터링하고, 수집된 감사 로그와 침해 위협을 현장에서 추적 및 분석하며, 비정상 암호화 피해가 발생한 파일을 원본 버전으로 원복하고 정책 설정을 서명 배포하는 고기능 콘솔 통제 도구(바이너리명: `argos`)입니다.
+`argos`는 v0.2.0의 로컬 조사·복구·정책 관리 도구다. 에이전트와 같은 설정을 지정한다.
+명령은 해당 DB·백업에 필요한 OS 권한이 있는 계정으로 실행한다. 중앙 관리자 토큰이
+로컬 CLI 권한을 부여하지는 않는다. 명령별 옵션은 `argos <명령> --help`, 정책·보존 작업은 `argos policy --help`와
+`argos retention --help`에서 확인한다.
 
----
+```bash
+argos --config /etc/argos/argos.toml status
+argos --config /etc/argos/argos.toml threats -n 30
+```
 
-## 1. 주요 역할 및 책임
+`-c`/`--config`는 전역 옵션이며 기본 경로는 현재 디렉터리의 `argos.toml`이다.
+파일이 없으면 기본값을 사용한다. Linux 기본 감시 경로는 `/home`, DB는
+`/var/lib/argos/argos.db`, 백업은 `/var/lib/argos/backup`이다. 예제 설정의 `./watched`와
+구분한다. 존재하는 설정 파일이 잘못된 TOML이면 오류로 종료한다.
 
-1. **상태 모니터링 및 진단**: 에이전트 구성 변수 상태 및 로컬 DB 파일 누적 지표를 조회하고(`status`), 시스템 헬스체크 및 API 환경을 진단합니다(`doctor`).
-2. **이벤트 로그 및 위협 추적**: 로컬 디렉터리에 적재된 SQLite 감사 레코드를 파싱하여 최근 활동 및 정밀 위협 목록을 화면에 렌더링합니다(`events`, `threats`).
-3. **AI 기반 침해 요약 분석**: 로컬 DB 윈도우 시점의 로그를 슬라이스해 컨텍스트를 구성하고 Claude API에 전송하여 심층 원인 보고서를 요청합니다(`explain`, `ask`).
-4. **암호화 피해 파일 롤백**: CAS 백업본의 해시 무결성을 현장에서 직접 검산하고 덮어씌워 파일 원복을 단행합니다(`restore`).
-5. **네트워크 단절 통제**: 비정상 연결 프로세스 차단 및 아웃바운드 패킷 방어를 iptables 체인을 생성해 수동 적용하거나 롤백합니다(`isolate`).
-6. **Ed25519 설정 정책 서명**: 정책 설정 구성에 전자 서명 파일(`.sig`)을 날인하여 변조된 공격을 무력화하는 무결성 서명 정책을 빌드합니다(`policy`).
+## 상태와 최근 이력
 
----
+| 명령 | 동작·기본값 |
+| --- | --- |
+| `status` | 로컬 설정, 생존 신호와 보호 지표, DB의 누적 이벤트·탐지 건수. 생존 신호가 60초보다 오래되면 경고한다. |
+| `doctor` | 탐지 설정 유효성·센서별 임계치 경고, OS와 설정/DB/백업/감시 경로 존재 여부, Anthropic 키 환경변수 유무. |
+| `events [-n N]` | 최근 파일 이벤트. 기본 20건. |
+| `threats [-n N]` | 최근 탐지의 ID·점수·심각도·요약. 기본 20건. |
+| `processes [-n N]` | 저장된 프로세스 관측의 PID·PPID·유효 UID·이름·명령행. 기본 20건. |
+| `scan PATH` | 현재 파일 앞부분의 엔트로피를 읽어 고엔트로피 파일을 표시한다. 기본 최대 64 KiB, 기준 7.2. |
 
-## 2. CLI 서브커맨드 상세 명세 및 동작 원리
+DB 이력 조회는 읽기 전용이며 `status`가 데몬에 직접 질의하는 것은 아니다. 표시한
+자동 차단 값은 로컬 설정 값이므로 서명 정책의 수락 설정 및 `policy.invalid`와 함께
+확인한다. 프로세스 수집은 Linux `/proc` 폴링이며 시작 이후 관측된 실행·자격 변화도
+저장한다. 전체 신원·자격은 아래 `evidence` JSON을 사용한다.
 
-`argos-cli`는 사용자 명령어 인자 분기를 위해 `clap` 파서를 탑재하였으며, 에이전트 서비스와 리소스를 유기적으로 분담합니다.
+`doctor`의 경로 확인은 실제 접근 권한·센서 작동·AI 연결 시험이 아니다. Anthropic 키
+항목은 Ollama 구성에서도 출력된다. `scan`은 부분 암호화 비교나 공격 확정 검사가
+아니며 에이전트의 다중 위치 표본 설정과 별개다.
 
-### 2.1. `status` & `doctor`
-- **`status`**:
-  - 에이전트 설정상의 SQLite DB 경로와 감시 대상 경로 목록, 백업 CAS 위치, 자동 차단 기능 활성 여부 등을 가독성 있게 정렬합니다.
-  - 에이전트 DB와의 잠금 충돌을 회피하기 위해 `rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY` 플래그로만 DB를 열어 누적된 이벤트 카운트를 출력합니다.
-- **`doctor`**:
-  - OS 계층 정보(Windows/Linux 등), 설정 파일과 SQLite DB 및 CAS 디렉터리 접근 가능 권한 유무를 검사합니다.
-  - AI 분석용 환경 변수인 `ANTHROPIC_API_KEY` 탑재 상태 및 비 Linux 여부에 따른 커널 제약 사양을 리포트합니다.
+## 근거·사건·AI
 
-### 2.2. `events` & `threats` & `processes`
-- **`events`**:
-  - `EventStore::recent_events`를 호출하여 최신 수집된 파일 액션(생성, 수정, 삭제, 이름변경) 이력을 시간순 테이블 포맷으로 나열합니다.
-- **`threats`**:
-  - `EventStore::recent_detections_with_id` 쿼리를 실행해 탐지된 침해 패턴 목록을 출력합니다. 각 레코드는 고유 ID 번호 및 점수, 위협 레벨을 표기합니다.
-- **`processes`** (Linux 전용):
-  - 프로세스 모니터가 수집한 신규 Exec 실행 로그(`/proc` 스캔 결과)를 출력해 관리자가 위협 시점 전후에 가동된 비정상 명령행(`cmdline`)을 매핑할 수 있게 돕습니다.
+| 명령 | 옵션·결과 |
+| --- | --- |
+| `evidence --from-ms N --to-ms N [--pid PID] [--limit N]` | 양 끝을 포함하는 기간의 파일·탐지·프로세스·대응 JSON. 기본 종류별 200건, 허용 1~10,000건. |
+| `incident ID [--window-secs N] [--limit N] [--html NEW_PATH]` | 탐지 앞뒤 각각 기본 300초, 종류별 기본 1,000건. JSON 또는 새 HTML 보고서. |
+| `explain ID` | 탐지 앞 설정 시간창과 뒤 5초의 근거로 AI 분석. 다중 시간창 규칙은 가장 긴 설정 창을 사용한다. |
+| `ask QUESTION... [--from-ms N --to-ms N] [--pid PID]` | 해석한 기간 또는 명시한 구간으로 AI 질문. 기본 기간 24시간, 조회 상한은 `ai.evidence_limit`(기본 200). |
+| `mcp` | 단일 로컬 DB의 `query_evidence`만 제공하는 MCP stdio 서버. |
+| `evidence-export ID --out NEW_DIR [--window-secs N] [--limit N] [--include-sensitive]` | 기본 앞뒤 300초·종류별 1,000건의 사건 자료와 정책을 새 디렉터리로 저장한다. 기본 마스킹 적용. |
+| `evidence-verify DIR` | 패키지 파일 목록·크기·SHA-256 검사. 발급자 서명 검사는 아니다. |
 
-### 2.3. `explain` & `ask`
+조회에는 전체 건수와 `truncated`가 포함된다. `--pid`는 숫자 PID 필터이므로 같은 PID의
+다른 시작 ticks·boot ID를 조사 과정에서 구분한다. AI는 Anthropic과 Ollama를 지원하고
+모델 ID를 명시해야 한다. AI 키 없이 근거·HTML·MCP·패키지를 사용할 수 있다.
+[AI/조사](FEATURE_AI.md), [자격 근거](FEATURE_LINUX_ANALYSIS.md),
+[증거 패키지](FEATURE_EVIDENCE_PACKAGE.md)에 범위와 누락·전송 조건을 설명한다.
 
-`explain <ID>`는 탐지 시간창과 이후 5초의 근거를 조회한다. 다중 시간 구간 규칙은 설정된 가장 긴 시간창을 포함한다. `ask`는 질문에서 해석한 기간 또는 명시한 `--from-ms`/`--to-ms`와 선택 PID로 조회한다. 근거 ID·종류별 전체 건수·상한으로 인한 누락과 대응 결과를 AI에 전달한다. 제공자·주소·모델은 설정하며 상세한 범위는 [AI/조사 문서](FEATURE_AI.md)를 따른다.
+## 정상 복구 지점과 사건 보존
 
-### 2.4. `restore` (내용 주소 지정 백업 복구)
-- 사용자가 복구를 희망하는 대상 경로와 선택 매개변수(`--before-ms` 등)를 확인합니다.
-- 복구 엔진인 [argos-recovery](file:///d:/project/ArgosAISecurity/crates/argos-recovery/src)를 로컬 직접 열어 versions 테이블을 조회합니다.
-- `--list` 옵션 지정 시 해당 파일의 과거 누적 백업 해시와 타임스탬프 이력을 조회하여 표출합니다.
-- 복구 명령 발동 시 CAS 객체의 데이터를 로드해 SHA-256 해시 무결성을 재검수하여, 백업 데이터 자체가 오염되거나 임의 변조되었을 시 복구 절차를 즉시 에러로 중단하고 방어합니다. 검증 성공 시 원자적 파일 rename 교체를 통해 롤백을 단행합니다.
+```bash
+argos restore /srv/data/report.txt --list
+argos restore /srv/data/report.txt --version 23 --preview /tmp/report-review.txt
+argos restore /srv/data/report.txt --mark-good 23 --note "검토한 배포 원본과 일치"
+argos restore /srv/data/report.txt --recommend --before-ms 1760000000000
+argos recovery-status --test /srv/data/report.txt --before-ms 1760000000000
+argos restore /srv/data/report.txt --before-ms 1760000000000
+```
 
-### 2.5. `isolate` (네트워크 차단 격리)
-- `iptables` 호출 유틸리티를 호출합니다 (리눅스 전용, 루트 권한 필요).
-- `--release` 유무를 체크하여 `ARGOS_ISOLATE` 체인을 생성하여 OUTPUT 체인에 인서트하거나 소거 롤백을 처리합니다.
+실제 버전·사건 시각과 서비스 설정을 사용한다. 기본 복구는 최신 **정상 판정 버전**만
+선택하며, `--before-ms`가 있으면 그 시각보다 이른 정상본만 선택한다. 미검토 최신본으로
+대체하지 않는다. `--version`은 `--preview`와 함께 쓰며 임의 버전의 원본 덮어쓰기 옵션은
+아니다. 정상 판정 취소는 `restore PATH --revoke-good ID --note TEXT`다.
 
-### 2.6. `policy` (Ed25519 설정 무결성 서명)
-- **`gen-key`**: Ed25519 타원곡선 키쌍을 생성해 콘솔에 출력합니다. 서명키는 로컬 파일(예: `signing.key`)로 안전 보관하고 검증키는 `argos.toml`의 `[policy.trusted_keys]`에서 키 ID에 연결합니다.
-- **`sign`**: 대상 `policy.toml` 파일 바이트 전체와 서명키 파일을 로드해 전자 서명을 연산하고 동명의 서명 파일 `policy.toml.sig`를 생성합니다.
-- **`verify`**: 서명 정책 파일과 `.sig` 파일을 검증키로 대조하여 정형 변조 여부를 1차 검증합니다.
-- **`show`**: 에이전트에 현재 로드되어 실 작동하고 있는 설정 정책의 세부 사항 및 검증 성공 상태를 표시합니다.
+`recovery-status`는 백업 준비도 JSON을 출력하고 `--html NEW_PATH`로 보고서를 만든다.
+`--test PATH`는 원본을 바꾸지 않는 복구 시험 후 결과를 저장하며 출력에 시험 결과
+문장도 포함한다. `--before-ms`는 `--test`와 함께 쓴다. 현재 감시 경로의 미기록 파일과
+10,000개 경로 검사 상한·접근 실패를 `untracked_paths`/`scan_truncated`로 표시한다.
 
+```bash
+argos retention pin /srv/data/report.txt --version 23 --incident INC-42 --actor operator --reason "사건 증거 보존"
+argos retention list --incident INC-42
+argos retention list --include-released
+argos retention release --incident INC-42 --approval CHG-82 --approver reviewer --reason "독립 검토 후 사건 종료"
+argos retention audit --incident INC-42
+```
 
-## 검증 가능한 대응·복구 명령 (2026-09)
+보존은 정상본 판정과 독립적이다. 여러 사건의 참조는 각각 해제하며 승인자는 최초
+고정 요청자와 달라야 한다. 승인 ID 재사용을 거부하지만 입력한 승인자 문자열 자체를
+외부 인증하는 기능은 없다. 자동 고정은 비동기 대기열을 거치므로 완료 참조를 확인한다.
+`restore`와 `recovery-status`는 백업이 활성화되어 있어야 한다. `retention`은
+백업 수집 활성 여부와 별도로 설정된 저장소를 관리한다. 이 명령들은 로컬 백업
+인덱스를 열거나 이전할 수 있다. `argos prune`은 제공하지 않는다. 자세한 조건은
+[복구 기능](FEATURE_RECOVERY.md)을 따른다.
 
-- `policy simulate --candidate PATH --from-ms N --to-ms N [--max-events N]`: 기존/후보 정책을 저장 근거에 재생한다. 실제 차단이나 적용은 없다.
-- `restore PATH --list`: 무결성과 별개인 정상 판정 상태/근거를 확인한다.
-- `restore PATH --mark-good ID --note TEXT`, `--revoke-good ID --note TEXT`: 정상 판정 지정/취소.
-- `restore PATH --version ID --preview NEW_PATH`: 미검토 버전도 별도 새 파일로 검사한다.
-- `restore PATH [--before-ms N]`: 지정 구간의 정상 판정 버전만 복구한다. 미검토 최신본으로 자동 대체하지 않는다.
-- `recovery-status [--test PATH] [--html NEW_PATH]`: 복구 준비도와 원본 유지 복구 시험. 중요 경로의 현재 파일 중 미기록 파일도 표시하며, 10,000개 경로 검사 상한/접근 실패는 부분 검사로 알린다.
-- `evidence`, `ask`, `mcp`, `incident`: [AI/조사 문서](FEATURE_AI.md) 참조.
-- `canary-init ABSOLUTE_PATH`: 설정된 미끼 파일을 기존 파일 덮어쓰기 없이 만든다. 센서 시작 전에 설치한다.
-- `isolate --allow in:192.0.2.20:22 --allow out:10.0.0.5:8420 --dry-run`: 격리 계획 출력. 적용·해제는 [격리 문서](FEATURE_RESPONSE.md) 참조.
+## 정책 검증·활성화·사전 비교
 
-잘못된 TOML 설정은 기본값으로 무시하지 않고 오류로 종료한다. `status`는 로컬 생존 신호 시각과 큐/백업/센서 지표를 표시한다. 오래된 신호나 기록 없음은 안전하다는 의미가 아니다.
+| 명령 | 의미 |
+| --- | --- |
+| `policy gen-key` | 비밀키·공개키를 콘솔에 출력한다. 비밀키는 관리 머신의 제한된 파일에 별도 보관한다. |
+| `policy sign PATH --key-file KEY_PATH` | 파일 전체 바이트를 서명해 `PATH.sig`에 저장한다. |
+| `policy verify` | 신뢰 키 설정이 있으면 서명·기간·대상·설정을 검사한다. 이전 `pubkey`만 있으면 서명만 검사한다. |
+| `policy show` | 서명 정책 사용 시 영속 저장된 마지막 수락 원문을 JSON으로 출력한다. 미사용 시 로컬 탐지 설정을 표시한다. |
+| `policy status [--limit N]` | 마지막 수락 버전·해시와 감사 JSON. 기본 100건, 최대 1,000건. |
+| `policy simulate --candidate PATH --from-ms N --to-ms N [--max-events N]` | 수락 정책/로컬 설정과 후보를 저장 근거에 재생한다. 기본 100,000건, 준비 구간 포함 최대 1,000,000건. |
 
+`verify`와 `simulate`는 정책을 적용하거나 영구 최대 버전을 증가시키지 않는다. 실제
+버전·재사용 검사와 활성화는 에이전트 시작 시 실행한다. `show`/`status`도 현재 프로세스의
+가동 여부를 보증하지 않는다. 후보 파일이 거부되어도 마지막 수락 설정을 조회할 수 있다.
+서명·대상·기간·승인 롤백·상태 경로 권한은 [정책 신뢰](FEATURE_POLICY.md)를 따른다.
 
-## 정책 신뢰·사건 보존·증거 패키지
+## 미끼 파일·격리·미구현 명령
 
-- `argos policy status --limit 100`: 마지막 수락 정책과 거부/재시작/롤백 감사 기록. `policy show`는 후보 파일 대신 마지막 수락 원문을 조회한다.
-- `argos retention pin PATH --version ID --incident INC --actor USER --reason TEXT`: 정상 판정과 별도로 사건 보존 참조를 추가한다.
-- `argos retention list --incident INC`, `argos retention audit --incident INC`: 활성 참조와 감사 이력.
-- `argos retention release --incident INC --approval APPROVAL_ID --approver USER --reason TEXT`: 별도 승인 근거로 사건 참조 해제.
-- `argos evidence-export ID --out NEW_DIR`: 기본 마스킹을 적용한 사건 증거 패키지.
-- `argos evidence-verify DIR`: 파일 목록·크기·SHA-256 검증.
+`canary-init ABSOLUTE_PATH`는 `detection.canary_paths`에 등록된 경로에 새 파일을 만든다.
+기존 파일은 덮어쓰지 않는다. 감시 시작 전에 설치하고 [미끼 탐지](FEATURE_DETECTION.md)를
+확인한다.
 
-상세 조건은 [정책 신뢰](FEATURE_POLICY.md), [복구 보존](FEATURE_RECOVERY.md), [증거 패키지](FEATURE_EVIDENCE_PACKAGE.md)를 참고한다.
+```bash
+argos isolate --dry-run --allow in:192.0.2.20:22 --allow out:10.0.0.5:8443
+sudo argos isolate --allow in:192.0.2.20:22 --allow out:10.0.0.5:8443
+sudo argos isolate --release
+```
+
+격리는 IPv4·IPv6 INPUT/OUTPUT/FORWARD의 Argos 규칙을 적용·확인한다. `--allow`는
+방향·숫자 IP/CIDR·TCP 포트가 필요하며 중앙·SSH 연결을 자동 허용하지 않는다.
+`--dry-run`은 도구나 권한 없이 계획만 출력한다. 실제 적용 조건과 한계는
+[대응·격리](FEATURE_RESPONSE.md)를 따른다.
+
+`update`는 아직 안내만 출력하는 자리 표시자다. 정책 배포나 바이너리 업데이트를
+실행하지 않는다. `prune`, `kill`, `policy apply` 명령은 제공하지 않는다.

@@ -1,33 +1,35 @@
 # Argos AI Security
 
 AI 기반 Linux 서버 보안 플랫폼 (랜섬웨어 탐지·차단·복구). Rust 워크스페이스.
-제품 요건: docs/REQUIREMENTS.md (단일 진실 공급원 — 기능 추가 전 반드시 확인).
+현재 릴리즈: v0.2.0. 제품 목표와 미구현 요구는 docs/REQUIREMENTS.md, 실제 구현 경계는 docs/ARCHITECTURE.md와 docs/ROADMAP.md, 실행 검증 범위는 docs/PLATFORM_VALIDATION.md를 확인한다. 기능 추가 전 요건서와 현재 코드를 함께 확인한다.
 
 ## 빌드/테스트
 
 ```bash
-cargo build --workspace
-cargo test --workspace
+cargo build --workspace --locked
+cargo test --workspace --locked
 cargo run -p argos-agent              # 데몬 (argos.toml 또는 기본값)
 cargo run -p argos-cli -- status      # CLI (바이너리 이름: argos)
 ```
 
-개발 머신이 Windows여도 전체 워크스페이스가 컴파일된다.
+notify 기반 개발과 비 Linux 조건부 컴파일 경계를 유지한다. v0.2.0 배포·실행 검증은 Linux x86_64 기준이다.
 Linux 전용 코드는 `#[cfg(target_os = "linux")]`로 격리할 것 — cfg 없이 libc 시그널/fanotify 코드를 넣지 말 것.
+
+실제 CLI·에이전트 검증은 `scripts/smoke-test.sh`, `scripts/platform-smoke.py`, `scripts/security-scenarios.py`를 사용한다. 사용자/네트워크 네임스페이스에서 격리를 검증하는 `scripts/test-isolation-netns.py`도 있다. 운영 호스트의 방화벽을 직접 바꾸는 시험으로 대체하지 않는다. 각 실행 파일 경로 지정법과 검증 한계는 검증 기록을 참고한다.
 
 ## 구조
 
 - `crates/argos-common` — 이벤트·탐지·설정 타입. 다른 모든 크레이트가 의존. 여기에 로직 넣지 말 것.
-- `crates/argos-sensor` — 파일 이벤트 수집. 공개 API `spawn_sensor(kind, paths, tx)`. 백엔드: notify(기본, pid=0) / fanotify(Linux, root, pid 제공 — src/fanotify.rs). 프로세스 감시는 procmon.rs(/proc 폴링, Linux 전용, `spawn_proc_monitor`).
-- `crates/argos-detect` — 행위 점수(BehaviorScorer) + 엔트로피. 순수 로직, I/O는 file_entropy만.
-- `crates/argos-storage` — SQLite(WAL). 에이전트가 쓰고 CLI는 read-only로 연다.
-- `crates/argos-response` — 대응 실행. pid 0 차단은 반드시 거부 (kill(0)은 프로세스 그룹 전체 시그널). 네트워크 격리는 isolate.rs (iptables ARGOS_ISOLATE 체인, 명령 생성은 OS 무관해 단위 테스트 가능, 실행만 cfg-gated).
-- `crates/argos-recovery` — 내용 주소(SHA-256) 백업 + 해시 검증 복구. 백업 dir는 감시 경로 밖에 둘 것.
-- `crates/argos-policy` — Ed25519 정책 서명/검증. 서명 대상은 파일 바이트 그대로(정규화 없음). 검증 실패 시 정책 미적용이 원칙 (요건서 11장).
+- `crates/argos-sensor` — 파일 이벤트 수집. 공개 API `spawn_sensor(kind, paths, tx)`. 백엔드: notify(기본, pid=0) / fanotify(Linux, root, pid 제공 — src/fanotify.rs). procmon.rs는 /proc 폴링으로 프로세스 시작 신원·실행 이미지·UID/GID·capability 변화와 파일 이벤트의 부모 계보를 수집한다. 폴링 사이 변화는 누락될 수 있다.
+- `crates/argos-detect` — 센서별 행위 점수·승인 작업·미끼 파일, 선택적 다중 시간 구간 집계. 내용 I/O는 file_entropy와 ContentSampler에서 수행하며 표본 예산·이력 상한을 둔다. 계정·경로·계보 집계 알림을 현재 PID의 차단 점수로 전환하지 않는다. 동일 프로세스 인스턴스의 충분한 개별 근거는 차단 평가에 반영한다.
+- `crates/argos-storage` — SQLite(WAL) 이벤트·탐지·대응 근거, 전송 outbox·보존 요청 큐. 탐지와 관련 큐 요청은 트랜잭션으로 기록한다. 조회 CLI는 이벤트 DB를 읽기 전용으로 연다.
+- `crates/argos-response` — 신원 확인 후 pidfd 대응 실행·결과 확인. pid 0 차단은 반드시 거부 (kill(0)은 프로세스 그룹 전체 시그널). isolate.rs는 IPv4/IPv6의 ARGOS_INPUT·ARGOS_OUTPUT·ARGOS_FORWARD 체인을 관리한다. ARGOS_ISOLATE는 구형 규칙 정리 대상이다. 명령 생성은 OS 무관해 단위 테스트 가능하며 실행만 cfg-gated다.
+- `crates/argos-recovery` — 내용 주소(SHA-256) 백업, 정상본 판정·미리보기·복구 시험, 독립 사건 참조·승인 해제. 정상본 및 사건 보존 버전은 정리에서 제외한다. 해시는 정상 내용의 증명이 아니다. 백업 dir는 감시 경로 밖에 둘 것.
+- `crates/argos-policy` — 한 번 읽은 동일 바이트의 Ed25519 검증·파싱. 로컬 신뢰 키와 정책 ID·버전·기간·대상을 검사하고 SQLite에 수락 원문·최대 버전·감사를 원자적으로 저장한다. 설정한 정책 검증 실패 시 에이전트 시작을 중단하며 기본 설정으로 우회하지 않는다. verify는 읽기 전용 사전 확인, 활성화는 에이전트 시작 경로다.
 - `crates/argos-brain` — Anthropic/Ollama HTTP 호출 (모델·주소·제공자는 [ai] 설정, 키는 환경변수). 프롬프트에 storage의 실제 이벤트만 근거로 제공 — hallucination 방지 원칙.
 - `crates/argos-central` — axum 중앙 서버 (등록/수집/조회). 인증: 관리자 조회/개별 에이전트 수집 토큰 분리. mTLS는 후속.
-- `crates/argos-agent` — 데몬 바이너리. 파이프라인: sensor → entropy → detect/respond → audit/store → 별도 backup/report 작업자. 중앙 보고는 SQLite outbox와 reporter.rs의 전용 std 스레드 (tokio 안에서 reqwest blocking 금지).
-- `crates/argos-cli` — `argos` 바이너리. DB read-only 조회 + restore/explain. 에이전트 상태 변경 금지.
+- `crates/argos-agent` — 데몬 바이너리. sensor → 프로세스 맥락·내용 표본 → detect/respond → audit/store → 별도 backup/retention/report 작업자. semantic.rs는 지정한 Linux 설정 파일의 의미 변화를 분석한다. 중앙 보고는 SQLite outbox와 reporter.rs의 전용 std 스레드 (tokio 안에서 reqwest blocking 금지). 실행 중 정책 기간 이탈 시 자동 차단을 중지하고 보호 저하를 표시한다.
+- `crates/argos-cli` — `argos` 바이너리. 근거·상태·정책 조회, 정책 재생, AI·조회형 MCP·HTML 보고서·증거 패키지. restore/retention/isolate처럼 명시적으로 요청한 복구·보존·격리 명령은 관련 저장소/파일/방화벽을 변경한다. 정책 show/status는 마지막 수락 상태이며 센서의 실제 가동 성공 증명이 아니다. update는 미구현이다.
 
 ## 컨벤션
 

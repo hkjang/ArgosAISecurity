@@ -5,13 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
   <!-- Primary SEO Meta Tags -->
-  <title>Argos AI Security | AI 기반 Linux 서버 보안 & 랜섬웨어 실시간 탐지·차단·복구 플랫폼</title>
-  <meta name="title" content="Argos AI Security | AI 기반 Linux 서버 보안 & 랜섬웨어 실시간 탐지·차단·복구 플랫폼">
-  <meta name="description" content="Argos AI Security는 실시간 행위 탐지, Shannon 엔트로피 분석, 해시 검증 무결성 복구, Ed25519 정책 서명 및 Claude AI Threat Copilot을 결합한 차세대 Linux 서버 보안 플랫폼입니다.">
-  <meta name="keywords" content="Argos AI Security, Linux Server Security, Ransomware Defense, AI Cybersecurity, Behavior Scoring, Shannon Entropy, Content-Addressable Storage, Ed25519 Policy, Claude AI Copilot, Rust Security">
+  <title>Argos AI Security v0.2.0 | 검증 가능한 Linux 차단·복구</title>
+  <meta name="title" content="Argos AI Security v0.2.0 | 검증 가능한 Linux 차단·복구">
+  <meta name="description" content="파일·프로세스 행위 분석, 서명 정책 검증, 정상 복구 지점과 사건 증거 보존. Anthropic·Ollama를 통한 근거 기반 AI 조사를 지원합니다.">
+  <meta name="keywords" content="Argos AI Security, Linux Server Security, Ransomware Defense, AI Cybersecurity, Behavior Scoring, Shannon Entropy, Content-Addressable Storage, Ed25519 Policy, Ollama, Incident Evidence, Rust Security">
   <meta name="author" content="Argos AI Security Team">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://hkjang.github.io/ArgosAISecurity/">
+
+  <link rel="alternate" hreflang="ko" href="https://hkjang.github.io/ArgosAISecurity/">
+  <link rel="alternate" hreflang="en" href="https://hkjang.github.io/ArgosAISecurity/index_en.html">
 
   <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="images/logo.svg">
@@ -19,117 +22,90 @@
   <!-- Open Graph / Facebook / LinkedIn (SEO) -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://hkjang.github.io/ArgosAISecurity/">
-  <meta property="og:title" content="Argos AI Security | AI 기반 Linux 서버 보안 & 랜섬웨어 실시간 탐지·차단·복구 플랫폼">
-  <meta property="og:description" content="실시간 파일/프로세스 감시, Shannon 엔트로피 0초 탐지, 해시 검증 100% 복구 및 Claude AI Copilot 기반 Linux 서버 방어 시스템.">
-  <meta property="og:image" content="https://hkjang.github.io/ArgosAISecurity/images/og-banner.jpg">
+  <meta property="og:title" content="Argos AI Security v0.2.0 | 검증 가능한 Linux 차단·복구">
+  <meta property="og:description" content="파일·프로세스 행위 분석, 서명 정책 검증, 정상 복구 지점과 사건 증거 보존. Anthropic·Ollama를 통한 근거 기반 AI 조사를 지원합니다.">
   <meta property="og:site_name" content="Argos AI Security">
 
   <!-- Twitter Card (SEO) -->
-  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:card" content="summary">
   <meta name="twitter:url" content="https://hkjang.github.io/ArgosAISecurity/">
-  <meta name="twitter:title" content="Argos AI Security | AI 기반 Linux 서버 보안 플랫폼">
-  <meta name="twitter:description" content="실시간 행위 탐지, Shannon 엔트로피 분석, 해시 검증 복구 및 Claude AI Threat Copilot으로 완벽한 랜섬웨어 방어를 구축하세요.">
-  <meta name="twitter:image" content="https://hkjang.github.io/ArgosAISecurity/images/og-banner.jpg">
+  <meta name="twitter:title" content="Argos AI Security v0.2.0 | 검증 가능한 Linux 차단·복구">
+  <meta name="twitter:description" content="파일·프로세스 행위 분석, 서명 정책 검증, 정상 복구 지점과 사건 증거 보존. Anthropic·Ollama를 통한 근거 기반 AI 조사를 지원합니다.">
 
   <!-- Stylesheet -->
   <link rel="stylesheet" href="style.css">
 
   <!-- JSON-LD Structured Data (AEO & Search Engine Schema) -->
   <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "SoftwareApplication",
-        "name": "Argos AI Security",
-        "operatingSystem": "Linux (Ubuntu, Debian, RHEL, CentOS, Rocky Linux)",
-        "applicationCategory": "SecurityApplication",
-        "description": "AI-powered Linux Server Security Platform for real-time ransomware detection, process termination, hash-verified file recovery, and AI copilot incident explanation.",
-        "softwareVersion": "1.0.0",
-        "license": "https://github.com/hkjang/ArgosAISecurity/blob/main/LICENSE",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        }
-      },
-      {
-        "@type": "FAQPage",
-        "mainEntity": [
-          {
-            "@type": "Question",
-            "name": "기존 EDR/백신 제품과 Argos AI Security의 핵심 차별점은 무엇인가요?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Argos는 정적 시그니처 비교에 의존하지 않고, 실시간 행위 점수(Behavior Scoring)와 Shannon 엔트로피 분석을 결합하여 Zero-day 랜섬웨어도 즉각 감지합니다. 또한 변조된 파일은 SHA-256 CAS 저장소를 통해 변조 전 시점으로 100% 해시 검증 복구가 가능합니다."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "오탐(False Positive)으로 인한 서비스 중단 방지 대책은 무엇인가요?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "기본 설정은 auto_block=false(Dry-run)이며, 위험 점수가 80점 이상이고 검증된 PID가 식별된 경우에만 차단 조치가 실행됩니다. 시스템 핵심 PID 0에 대한 시그널 전송은 원천 차단됩니다."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "AI 분석 기능 시 기업 내부 민감 데이터 유출 위험은 없나요?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "argos-brain 모듈은 파일 본문 내용이 아닌 SQLite 감사 로그의 이벤트 유형, 변경 건수, 엔트로피 점수 등 메타데이터만을 요약하여 Claude API에 제공하므로 민감 정보 유출 위험이 없습니다."
-            }
-          }
-        ]
-      },
-      {
-        "@type": "Organization",
-        "name": "Argos AI Security",
-        "url": "https://hkjang.github.io/ArgosAISecurity/",
-        "logo": "https://hkjang.github.io/ArgosAISecurity/images/logo.svg",
-        "contactPoint": {
-          "@type": "ContactPoint",
-          "email": "gagagiga@naver.com",
-          "contactType": "technical support"
-        }
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "Argos AI Security",
+      "operatingSystem": "GNU/Linux x86_64 (release binaries: glibc 2.39+)",
+      "applicationCategory": "SecurityApplication",
+      "description": "파일·프로세스 행위 분석, 서명 정책 검증, 정상 복구 지점과 사건 증거 보존. Anthropic·Ollama를 통한 근거 기반 AI 조사를 지원합니다.",
+      "softwareVersion": "0.2.0",
+      "downloadUrl": "https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.2.0",
+      "license": "https://github.com/hkjang/ArgosAISecurity/blob/v0.2.0/LICENSE",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
       }
-    ]
-  }
-  </script>
-<script id="auto-lang-detector">
-(function() {
-  var SAVED_KEY = 'user_lang_pref';
-  var userPref = localStorage.getItem(SAVED_KEY);
-  if (!userPref) {
-    var navLang = (navigator.language || (navigator.languages && navigator.languages[0]) || '').toLowerCase();
-    var isKoBrowser = navLang.indexOf('ko') === 0;
-    var isEnPage = window.location.pathname.indexOf('index_en.html') !== -1;
-    if (!isKoBrowser && !isEnPage) {
-      var target = window.location.href.replace(/index\.html$/, 'index_en.html');
-      if (target === window.location.href) target = 'index_en.html';
-      window.location.replace(target);
-    } else if (isKoBrowser && isEnPage) {
-      var target = window.location.href.replace(/index_en\.html$/, 'index.html');
-      if (target === window.location.href) target = 'index.html';
-      window.location.replace(target);
-    }
-  }
-
-  document.addEventListener('DOMContentLoaded', function() {
-    var langBtns = document.querySelectorAll('.lang-btn, [data-lang], #btn-ko, #btn-en, #localeToggle, #btn-lang-toggle');
-    langBtns.forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var lang = btn.getAttribute('data-lang') || (btn.textContent || '').trim().toLowerCase();
-        if (lang.indexOf('en') !== -1) {
-          localStorage.setItem(SAVED_KEY, 'en');
-        } else if (lang.indexOf('ko') !== -1 || lang.indexOf('한') !== -1) {
-          localStorage.setItem(SAVED_KEY, 'ko');
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Q1. 무엇을 검증할 수 있나요?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "센서별 탐지 점수와 대응 결과, 검토한 정상본의 해시와 복구 시험 결과를 구분해서 확인합니다. v0.2.0은 144개 단위·회귀 테스트와 8개 보안 시나리오를 통과했습니다. 이는 운영 탐지율·처리량이나 모든 파일의 복구 가능성을 보증하는 수치가 아닙니다."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Q2. 기본 설정에서 프로세스가 자동 차단되나요?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "아니요. auto_block=false가 기본이며 notify 센서는 원인 PID를 제공하지 않습니다. 자동 차단은 명시적 활성화, 기본 80점 임계치와 규칙 조건, Linux 프로세스 신원 검증이 필요합니다. 오탐 위험이 있으므로 정책 재생과 관찰 모드로 먼저 확인하세요."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Q3. AI에 어떤 데이터가 전달되나요?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "설정한 제공자에 저장된 이벤트·탐지·프로세스·대응 근거를 전달합니다. 파일 본문을 직접 보내지는 않지만 경로·명령행·계정 정보에도 민감한 값이 있을 수 있습니다. Anthropic은 외부 API이며, Ollama는 지정한 사내 주소로 구성할 수 있습니다. 모델 ID와 조회 범위를 확인하세요."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Q4. 어떤 환경에서 사용할 수 있나요?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "v0.2.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다."
+          }
         }
-      });
-    });
-  });
-})();
-</script>
+      ]
+    },
+    {
+      "@type": "Organization",
+      "name": "Argos AI Security",
+      "url": "https://hkjang.github.io/ArgosAISecurity/",
+      "logo": "https://hkjang.github.io/ArgosAISecurity/images/logo.svg",
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "email": "gagagiga@naver.com",
+        "contactType": "technical support"
+      }
+    }
+  ]
+}
+  </script>
 </head>
 <body>
 
@@ -149,6 +125,7 @@
           <li><a href="#features" data-i18n="nav_features">핵심 기능</a></li>
           <li><a href="#cli-demo" data-i18n="nav_cli">CLI 데모</a></li>
           <li><a href="#architecture" data-i18n="nav_architecture">아키텍처</a></li>
+          <li><a href="#documentation" data-i18n="nav_docs">문서</a></li>
           <li><a href="#faq" data-i18n="nav_faq">자주 묻는 질문</a></li>
         </ul>
       </nav>
@@ -157,10 +134,10 @@
           <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
         </button>
       <div class="nav-actions">
-        <button id="btn-lang-toggle" class="btn-lang" title="Toggle Language (KR / EN)">
+        <a id="btn-lang-toggle" class="btn-lang" href="index_en.html" hreflang="en" aria-label="English page">
           <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 11.37 9.198 15.358 6 18.15"></path></svg>
           <span id="lang-text">EN</span>
-        </button>
+        </a>
         <a href="https://github.com/hkjang/ArgosAISecurity" target="_blank" rel="noopener" class="btn-primary">
           <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path></svg>
           GitHub
@@ -175,19 +152,15 @@
       <div class="container">
         <div class="badge">
           <span class="badge-dot"></span>
-          <span data-i18n="hero_badge">AI 기반 Linux 서버 랜섬웨어 방어 플랫폼</span>
+          <span data-i18n="hero_badge">v0.2.0 · Linux 보안 플랫폼</span>
         </div>
 
-        <h1 data-i18n="hero_title">
-          Linux 서버 보안의 새로운 기준,<br>
-          <span class="text-gradient">Argos AI Security</span>
-        </h1>
+        <h1 data-i18n="hero_title">차단과 복구를 검증하는 Linux 보안<br><span class="text-gradient">Argos AI Security</span></h1>
 
-        <p class="subtitle" data-i18n="hero_subtitle">
-          실시간 파일·프로세스 감시, Shannon 엔트로피 분석, 0초 차단, 해시 검증 복구 및 Claude AI Threat Copilot을 통한 완벽한 랜섬웨어 방어 체계
-        </p>
+        <p class="subtitle" data-i18n="hero_subtitle">파일·프로세스 행위 분석, 서명 정책 검증, 정상 복구 지점과 사건 증거 보존. Anthropic·Ollama를 통한 근거 기반 AI 조사를 지원합니다.</p>
 
         <div class="hero-cta">
+          <a href="https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.2.0" class="btn-primary" data-i18n="btn_download">v0.2.0 다운로드</a>
           <a href="#quickstart" class="btn-primary" data-i18n="btn_quickstart">빠른 시작 가이드</a>
           <a href="#cli-demo" class="btn-secondary" data-i18n="btn_demo">CLI 데모 체험</a>
         </div>
@@ -195,20 +168,20 @@
         <!-- Metrics Bar -->
         <div class="metrics-bar">
           <div class="metric-item">
-            <div class="metric-value text-gradient" data-i18n="metric_time">0ms</div>
-            <div class="metric-label" data-i18n="metric_time_label">탐지-차단 지연 시간</div>
+            <div class="metric-value text-gradient" data-i18n="metric_time">v0.2.0</div>
+            <div class="metric-label" data-i18n="metric_time_label">공개 릴리즈</div>
           </div>
           <div class="metric-item">
-            <div class="metric-value text-gradient" data-i18n="metric_recovery">100%</div>
-            <div class="metric-label" data-i18n="metric_recovery_label">해시 검증 복구율</div>
+            <div class="metric-value text-gradient" data-i18n="metric_recovery">SHA-256</div>
+            <div class="metric-label" data-i18n="metric_recovery_label">복구 객체 무결성 검증</div>
           </div>
           <div class="metric-item">
             <div class="metric-value text-gradient" data-i18n="metric_policy">Ed25519</div>
-            <div class="metric-label" data-i18n="metric_policy_label">위변조 방지 정책 서명</div>
+            <div class="metric-label" data-i18n="metric_policy_label">서명·버전·기간 검증</div>
           </div>
           <div class="metric-item">
-            <div class="metric-value text-gradient" data-i18n="metric_ai">24/7</div>
-            <div class="metric-label" data-i18n="metric_ai_label">Claude AI 사고 분석</div>
+            <div class="metric-value text-gradient" data-i18n="metric_ai">Ollama</div>
+            <div class="metric-label" data-i18n="metric_ai_label">Anthropic·온프레미스 AI</div>
           </div>
         </div>
       </div>
@@ -219,8 +192,8 @@
       <div class="container">
         <div class="section-header">
           <span class="badge" style="background: rgba(59, 130, 246, 0.1); color: var(--secondary); border-color: rgba(59, 130, 246, 0.3);">Core Pillars</span>
-          <h2 class="section-title" data-i18n="sec_features_title">엔터프라이즈급 6대 핵심 보안 기능</h2>
-          <p class="section-desc" data-i18n="sec_features_desc">단순 로그 감시를 넘어 프로세스 차단, 복구, AI 분석까지 일체형으로 제공합니다.</p>
+          <h2 class="section-title" data-i18n="sec_features_title">탐지부터 조사·복구까지</h2>
+          <p class="section-desc" data-i18n="sec_features_desc">자동 차단은 기본 비활성입니다. 정책을 과거 이벤트로 비교하고 정상본을 검토한 뒤 운영 범위를 넓힐 수 있습니다.</p>
         </div>
 
         <div class="features-grid">
@@ -229,8 +202,8 @@
             <div class="feature-icon">
               <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
             </div>
-            <h3 data-i18n="feat1_title">실시간 행위 탐지 (Behavior Scoring)</h3>
-            <p data-i18n="feat1_desc">fanotify 및 notify 기반 파일/프로세스 감시. 슬라이딩 윈도우(10초) 내 변경·삭제·확장자 변경 행위를 0~100점 스케일로 실시간 평가합니다.</p>
+            <h3 data-i18n="feat1_title">행위·Linux 설정 분석</h3>
+            <p data-i18n="feat1_desc">notify/fanotify 파일 감시와 /proc 프로세스 관측을 결합합니다. 선택한 10/60/600초 집계와 SSH·sudoers·cron·systemd 설정 차이를 분석합니다.</p>
             <span class="feature-tag">argos-sensor + argos-detect</span>
           </div>
 
@@ -239,8 +212,8 @@
             <div class="feature-icon">
               <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
             </div>
-            <h3 data-i18n="feat2_title">Shannon 엔트로피 암호화 탐지</h3>
-            <p data-i18n="feat2_desc">파일 수정 발생 시 상위 64KB의 엔트로피를 계산(암호화 데이터 ≈ 7.2+). 랜섬웨어가 파일 전체를 암호화하기 직전에 즉각 감지합니다.</p>
+            <h3 data-i18n="feat2_title">내용 표본과 엔트로피</h3>
+            <p data-i18n="feat2_desc">기본 앞부분 64 KiB를 분석하며, 선택 기능으로 읽기 예산을 앞·중간·끝에 나눕니다. 이전 관측과 파일 유형을 비교하지만 파일 전체 검사나 공격 판정을 보증하지는 않습니다.</p>
             <span class="feature-tag">Shannon Entropy Engine</span>
           </div>
 
@@ -249,8 +222,8 @@
             <div class="feature-icon">
               <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
             </div>
-            <h3 data-i18n="feat3_title">해시 검증 무결성 복구 (CAS)</h3>
-            <p data-i18n="feat3_desc">SHA-256 내용 주소 백업 저장소(Content-Addressable Storage)를 운용하여, 변조 전 시점으로 100% 해시 검증 복구를 수행합니다.</p>
+            <h3 data-i18n="feat3_title">정상본 복구·사건 보존</h3>
+            <p data-i18n="feat3_desc">검토해 지정한 정상본만 원본에 복구합니다. 별도 경로 미리보기·복구 시험을 제공하고, 사건별 보존 참조를 정상 판정과 별도로 관리합니다.</p>
             <span class="feature-tag">argos-recovery (SHA-256)</span>
           </div>
 
@@ -259,8 +232,8 @@
             <div class="feature-icon">
               <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
             </div>
-            <h3 data-i18n="feat4_title">Ed25519 Cryptographic Policy</h3>
-            <p data-i18n="feat4_desc">서명되지 않은 보안 정책은 즉시 거부됩니다. 공격자에 의한 보안 정책 우회 및 임의 변경을 원천 차단합니다.</p>
+            <h3 data-i18n="feat4_title">서명 정책·사전 검증</h3>
+            <p data-i18n="feat4_desc">운영 활성화 시 Ed25519 서명·버전·유효기간·대상·키 ID를 검사합니다. 과거 이벤트 재생은 후보 정책의 알림·예상 차단 차이와 조회 누락을 보여줍니다.</p>
             <span class="feature-tag">argos-policy (Ed25519)</span>
           </div>
 
@@ -269,8 +242,8 @@
             <div class="feature-icon">
               <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 01-2 2h-1.686a2 2 0 01-1.996-1.854l-.066-.677a3.374 3.374 0 00-1.042-2.127l-.547-.547z"></path></svg>
             </div>
-            <h3 data-i18n="feat5_title">Claude AI Threat Copilot</h3>
-            <p data-i18n="feat5_desc">argos-brain 크레이트를 통해 실제 SQLite Audit Log에만 기반한 AI 위협 분석 요건 보고서를 즉시 작성합니다 (Hallucination 방지).</p>
+            <h3 data-i18n="feat5_title">근거 기반 AI·증거 패키지</h3>
+            <p data-i18n="feat5_desc">Anthropic 또는 Ollama로 기간별 근거 ID와 조회 누락을 포함해 조사합니다. 읽기 전용 MCP와 SHA-256 manifest를 포함한 사고 증거 내보내기를 지원합니다.</p>
             <span class="feature-tag">argos-brain (Claude API)</span>
           </div>
 
@@ -279,8 +252,8 @@
             <div class="feature-icon">
               <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
             </div>
-            <h3 data-i18n="feat6_title">프로세스 차단 & 네트워크 격리</h3>
-            <p data-i18n="feat6_desc">SIGKILL/SIGSTOP으로 위험 프로세스 즉각 사살 및 iptables 기반 ARGOS_ISOLATE 체인을 생성하여 2차 감염 확산을 방지합니다.</p>
+            <h3 data-i18n="feat6_title">프로세스 차단·네트워크 격리</h3>
+            <p data-i18n="feat6_desc">자동 차단을 켠 Linux 호스트에서 PID·시작 시각·부팅 ID를 확인하고 종료 결과를 기록합니다. 별도 격리 명령은 IPv4/IPv6의 명시적 관리 연결만 허용합니다.</p>
             <span class="feature-tag">argos-response (Linux)</span>
           </div>
         </div>
@@ -292,8 +265,8 @@
       <div class="container">
         <div class="section-header">
           <span class="badge">Interactive CLI</span>
-          <h2 class="section-title" data-i18n="sec_cli_title">강력한 CLI (Command Line Interface)</h2>
-          <p class="section-desc" data-i18n="sec_cli_desc">터미널에서 명령어 한 줄로 실시간 보안 상태 확인부터 AI 사고 분석, 파일 복구까지 제어합니다.</p>
+          <h2 class="section-title" data-i18n="sec_cli_title">CLI 사용 흐름 살펴보기</h2>
+          <p class="section-desc" data-i18n="sec_cli_desc">설명을 위한 가상 데이터와 요약 예시입니다. 실제 서버에 연결하거나 명령을 실행하지 않으며, 처리 시간·탐지율·복구율의 측정 결과가 아닙니다.</p>
         </div>
 
         <div class="cli-container">
@@ -305,23 +278,22 @@
             </div>
             <div class="cli-tabs">
               <button class="cli-tab active" data-cli="status">argos status</button>
-              <button class="cli-tab" data-cli="threats">argos threats</button>
-              <button class="cli-tab" data-cli="restore">argos restore</button>
-              <button class="cli-tab" data-cli="explain">argos explain</button>
               <button class="cli-tab" data-cli="policy">argos policy</button>
+              <button class="cli-tab" data-cli="restore">argos restore</button>
+              <button class="cli-tab" data-cli="explain">argos ask</button>
+              <button class="cli-tab" data-cli="evidence">argos evidence-export</button>
             </div>
           </div>
 
           <div class="cli-body" id="cli-output-container">
-            <div><span class="cli-prompt">gaga@argos-linux:~$</span> <span class="cli-cmd">argos status</span></div>
-            <div class="cli-output">[Argos Agent System Status]
-Daemon State: RUNNING (PID 4192)
-Storage: SQLite WAL (/var/lib/argos/argos.db - 4.2 MB)
-Active Sensor: fanotify (Linux Root Telemetry)
-Monitored Path: /srv/app/data, /etc/nginx, /var/www
-Policy Verification: PASSED (Ed25519 Signed by SecOps Key #1)
-Auto-Block: ENABLED (Score Threshold >= 80)
-Active Threats: 0 Critical | 1 Resolved</div>
+            <div><span class="cli-prompt">demo@argos:~$</span> <span class="cli-cmd">argos --config argos.toml status</span></div>
+            <div class="cli-output">[예제 설정을 사용하는 상태 출력 발췌]
+센서        : Notify
+자동 차단   : 비활성 (탐지 전용)
+중앙 서버   : 미연동 (standalone)
+
+생존 신호와 보호 지표는 실제 에이전트 기록에서 확인합니다.
+탐지 없음과 감시 중단은 서로 다른 상태입니다.</div>
           </div>
         </div>
       </div>
@@ -332,39 +304,39 @@ Active Threats: 0 Critical | 1 Resolved</div>
       <div class="container">
         <div class="section-header">
           <span class="badge" style="background: rgba(139, 92, 246, 0.1); color: var(--accent-purple); border-color: rgba(139, 92, 246, 0.3);">Rust Workspace</span>
-          <h2 class="section-title" data-i18n="sec_arch_title">탄탄한 시스템 아키텍처</h2>
-          <p class="section-desc" data-i18n="sec_arch_desc">독립된 Rust 크레이트 모듈화 설계로 극대화된 성능과 안전성을 제공합니다.</p>
+          <h2 class="section-title" data-i18n="sec_arch_title">수집·판단·보존을 나눈 구조</h2>
+          <p class="section-desc" data-i18n="sec_arch_desc">대응 판단과 알림 억제를 분리하고 백업·사건 보존·중앙 전송을 별도 작업으로 처리합니다. 실제 운영 처리량은 배포 환경에서 검증해야 합니다.</p>
         </div>
 
         <div class="arch-diagram">
           <div class="arch-node">
             <h4 data-i18n="arch_sensor">argos-sensor</h4>
-            <p data-i18n="arch_sensor_desc">notify / fanotify / procmon 파일 & 프로세스 이벤트 수집</p>
+            <p data-i18n="arch_sensor_desc">notify / fanotify 파일 이벤트와 /proc 신원·UID/GID·capability 관측</p>
           </div>
 
           <div class="arch-node">
             <h4 data-i18n="arch_detect">argos-detect</h4>
-            <p data-i18n="arch_detect_desc">Shannon 엔트로피 + 행위 점수 산정 로직</p>
+            <p data-i18n="arch_detect_desc">센서별 점수·내용 표본·선택적 다중 시간창과 계보 집계</p>
           </div>
 
           <div class="arch-node">
             <h4 data-i18n="arch_recovery">argos-recovery</h4>
-            <p data-i18n="arch_recovery_desc">SHA-256 CAS 버전 관리 백업 및 무결성 복구</p>
+            <p data-i18n="arch_recovery_desc">정상본 판정·미리보기·복구 시험·독립 사건 보존 참조</p>
           </div>
 
           <div class="arch-node">
             <h4 data-i18n="arch_response">argos-response</h4>
-            <p data-i18n="arch_response_desc">SIGKILL 프로세스 차단 & iptables 네트워크 격리</p>
+            <p data-i18n="arch_response_desc">pidfd 신원 확인·종료 결과 감사와 IPv4/IPv6 격리</p>
           </div>
 
           <div class="arch-node">
             <h4 data-i18n="arch_brain">argos-brain</h4>
-            <p data-i18n="arch_brain_desc">Claude API 기반 AI 사고 설명 및 자연어 질의응답</p>
+            <p data-i18n="arch_brain_desc">Anthropic / Ollama 기반 기간별 근거 조회와 AI 설명</p>
           </div>
 
           <div class="arch-node">
             <h4 data-i18n="arch_policy">argos-policy</h4>
-            <p data-i18n="arch_policy_desc">Ed25519 비대칭키 정책 서명 및 무결성 검증</p>
+            <p data-i18n="arch_policy_desc">서명·버전·기간·대상 검증, 승인 근거를 포함한 새 버전 롤백</p>
           </div>
         </div>
       </div>
@@ -375,33 +347,37 @@ Active Threats: 0 Critical | 1 Resolved</div>
       <div class="container">
         <div class="section-header">
           <span class="badge">Quick Start</span>
-          <h2 class="section-title">빠른 시작 (Quick Start)</h2>
-          <p class="section-desc">Rust 1.75+ 환경에서 명령 몇 줄로 에이전트와 CLI를 실행할 수 있습니다.</p>
+          <h2 class="section-title">v0.2.0 빠른 시작</h2>
+          <p class="section-desc">배포 바이너리: GNU/Linux x86_64, glibc 2.39 이상. 소스 빌드: Rust 1.86 이상.</p>
+          <p><a href="INSTALL_BINARY.md">설치·업그레이드</a> · <a href="FEATURE_AI.md">AI 제공자·모델 ID 설정</a></p>
         </div>
-
         <div style="background: #090d16; border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 2rem; font-family: var(--font-mono); font-size: 0.9rem; color: #e2e8f0; overflow-x: auto;">
-          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># 1. 워크스페이스 빌드</div>
-          <div style="color: #38bdf8; margin-bottom: 1rem;">cargo build --workspace</div>
-
-          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># 2. 에이전트 데몬 실행 (기본 설정)</div>
-          <div style="color: #38bdf8; margin-bottom: 1rem;">cargo run -p argos-agent</div>
-
-          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># 3. 다른 터미널에서 CLI 상태 및 위협 감시</div>
-          <div style="color: #38bdf8; margin-bottom: 1rem;">cargo run -p argos-cli -- status</div>
-          <div style="color: #38bdf8; margin-bottom: 1rem;">cargo run -p argos-cli -- threats</div>
-
-          <div style="color: var(--text-dim); margin-bottom: 0.5rem;"># 4. AI Copilot 사고 분석 (ANTHROPIC_API_KEY 설정)</div>
-          <div style="color: #38bdf8;">export ANTHROPIC_API_KEY=sk-ant-...</div>
-          <div style="color: #38bdf8;">cargo run -p argos-cli -- explain 1</div>
+          <div style="color: var(--text-dim); margin: 1rem 0 0.5rem;"># 1. 릴리즈 파일 두 개를 내려받고 압축 파일 검증</div>
+<div style="color: #38bdf8;">curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.2.0/argos-v0.2.0-linux-x86_64-gnu.tar.gz</div>
+<div style="color: #38bdf8;">curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.2.0/SHA256SUMS</div>
+<div style="color: #38bdf8;">sha256sum -c SHA256SUMS</div>
+<div style="color: var(--text-dim); margin: 1rem 0 0.5rem;"># 2. 압축을 풀고 감시·DB·백업 경로 설정 확인</div>
+<div style="color: #38bdf8;">tar -xzf argos-v0.2.0-linux-x86_64-gnu.tar.gz</div>
+<div style="color: #38bdf8;">cd argos-v0.2.0-linux-x86_64-gnu</div>
+<div style="color: #38bdf8;">cp config/argos.example.toml argos.toml</div>
+<div style="color: var(--text-dim); margin: 1rem 0 0.5rem;"># 3. 자동 차단이 꺼진 예제 설정으로 실행</div>
+<div style="color: #38bdf8;">./bin/argos-agent --config argos.toml</div>
+<div style="color: var(--text-dim); margin: 1rem 0 0.5rem;"># 4. 다른 터미널의 같은 디렉터리에서 상태 조회</div>
+<div style="color: #38bdf8;">./bin/argos --config argos.toml status</div>
         </div>
       </div>
     </section>
 
-    <!-- FAQ Accordion Section (AEO Target) -->
+<section id="documentation"><div class="container"><div class="section-header"><span class="badge">v0.2.0</span><h2 class="section-title">사용·운영 문서</h2><p class="section-desc">설정 방법, 검증 명령과 확인된 한계를 함께 제공합니다.</p></div><div class="features-grid"><div class="feature-card"><h3>시작·업그레이드</h3><ul class="footer-links"><li><a href="https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.2.0">v0.2.0 릴리즈</a></li><li><a href="INSTALL_BINARY.md">바이너리 설치</a></li><li><a href="SERVICE_CLI.md">CLI 사용 안내</a></li></ul></div>
+<div class="feature-card"><h3>탐지·정책</h3><ul class="footer-links"><li><a href="FEATURE_DETECTION.md">행위·내용 분석</a></li><li><a href="FEATURE_POLICY.md">정책 신뢰·사전 검증</a></li><li><a href="FEATURE_LINUX_ANALYSIS.md">Linux 설정·프로세스 자격</a></li></ul></div>
+<div class="feature-card"><h3>복구·조사</h3><ul class="footer-links"><li><a href="FEATURE_RECOVERY.md">정상본 복구·사건 보존</a></li><li><a href="FEATURE_EVIDENCE_PACKAGE.md">증거 패키지</a></li><li><a href="FEATURE_AI.md">AI 조사·조회형 MCP</a></li></ul></div>
+<div class="feature-card"><h3>운영·검증</h3><ul class="footer-links"><li><a href="FEATURE_RELIABILITY.md">전송·보호 상태</a></li><li><a href="PLATFORM_VALIDATION.md">검증 기록·한계</a></li><li><a href="ROADMAP.md">구현 현황·후속 계획</a></li></ul></div></div></div></section>
+
+    <!-- FAQ Accordion Section -->
     <section id="faq">
       <div class="container">
         <div class="section-header">
-          <span class="badge">FAQ & AEO</span>
+          <span class="badge">FAQ</span>
           <h2 class="section-title" data-i18n="sec_faq_title">자주 묻는 질문 (FAQ)</h2>
           <p class="section-desc" data-i18n="sec_faq_desc">Argos AI Security 도입 및 운용에 대한 주요 답변입니다.</p>
         </div>
@@ -410,45 +386,37 @@ Active Threats: 0 Critical | 1 Resolved</div>
           <!-- Q1 -->
           <div class="faq-item active">
             <button class="faq-question">
-              <span data-i18n="faq1_q">Q1. 기존 EDR/백신 제품과 Argos AI Security의 핵심 차별점은 무엇인가요?</span>
+              <span data-i18n="faq1_q">Q1. 무엇을 검증할 수 있나요?</span>
               <span class="faq-icon">▼</span>
             </button>
-            <div class="faq-answer" data-i18n="faq1_a">
-              Argos는 단순히 알려진 시그니처 패턴만 비교하는 것이 아니라, 실시간 행위 점수(Behavior Scoring)와 Shannon 엔트로피 분석을 결합하여 Zero-day 랜섬웨어도 즉각 감지합니다. 또한 공격으로 훼손된 파일은 SHA-256 기반 내용 주소 백업(CAS)을 통해 공격 이전 시점으로 100% 해시 검증 복구가 가능합니다.
-            </div>
+            <div class="faq-answer" data-i18n="faq1_a">센서별 탐지 점수와 대응 결과, 검토한 정상본의 해시와 복구 시험 결과를 구분해서 확인합니다. v0.2.0은 144개 단위·회귀 테스트와 8개 보안 시나리오를 통과했습니다. 이는 운영 탐지율·처리량이나 모든 파일의 복구 가능성을 보증하는 수치가 아닙니다.</div>
           </div>
 
           <!-- Q2 -->
           <div class="faq-item">
             <button class="faq-question">
-              <span data-i18n="faq2_q">Q2. 오탐(False Positive)으로 인해 중요한 서비스 프로세스가 차단될 위험은 없나요?</span>
+              <span data-i18n="faq2_q">Q2. 기본 설정에서 프로세스가 자동 차단되나요?</span>
               <span class="faq-icon">▼</span>
             </button>
-            <div class="faq-answer" data-i18n="faq2_a">
-              Argos는 안정성을 최우선으로 설계되었습니다. 기본 정책은 auto_block=false(Dry-run 모드)이며, 오탐 방지를 위해 위험 점수가 80점 이상이고 확실한 원인 pid가 식별된 경우에만 차단 조치를 수행합니다. 또한 시스템 핵심 프로세스(pid 0 등)에 대한 시그널 전송은 원천적으로 거부됩니다.
-            </div>
+            <div class="faq-answer" data-i18n="faq2_a">아니요. auto_block=false가 기본이며 notify 센서는 원인 PID를 제공하지 않습니다. 자동 차단은 명시적 활성화, 기본 80점 임계치와 규칙 조건, Linux 프로세스 신원 검증이 필요합니다. 오탐 위험이 있으므로 정책 재생과 관찰 모드로 먼저 확인하세요.</div>
           </div>
 
           <!-- Q3 -->
           <div class="faq-item">
             <button class="faq-question">
-              <span data-i18n="faq3_q">Q3. AI 분석 기능 사용 시 기업 내 민감한 파일 내용이 외부로 유출되나요?</span>
+              <span data-i18n="faq3_q">Q3. AI에 어떤 데이터가 전달되나요?</span>
               <span class="faq-icon">▼</span>
             </button>
-            <div class="faq-answer" data-i18n="faq3_a">
-              전혀 유출되지 않습니다. argos-brain 크레이트는 실제 파일 내용이 아닌, SQLite 감사 로그에 기록된 파일 이벤트 유형, 변경 비율, 엔트로피 점수 등 메타데이터만을 요약하여 Claude API로 전달합니다 (Hallucination 방지 및 보안 준수).
-            </div>
+            <div class="faq-answer" data-i18n="faq3_a">설정한 제공자에 저장된 이벤트·탐지·프로세스·대응 근거를 전달합니다. 파일 본문을 직접 보내지는 않지만 경로·명령행·계정 정보에도 민감한 값이 있을 수 있습니다. Anthropic은 외부 API이며, Ollama는 지정한 사내 주소로 구성할 수 있습니다. 모델 ID와 조회 범위를 확인하세요.</div>
           </div>
 
           <!-- Q4 -->
           <div class="faq-item">
             <button class="faq-question">
-              <span data-i18n="faq4_q">Q4. Linux 외에 Windows나 macOS 환경에서도 빌드 및 개발 테스트가 가능한가요?</span>
+              <span data-i18n="faq4_q">Q4. 어떤 환경에서 사용할 수 있나요?</span>
               <span class="faq-icon">▼</span>
             </button>
-            <div class="faq-answer" data-i18n="faq4_a">
-              네, 전체 워크스페이스는 Windows/macOS 환경에서도 컴파일 및 테스트가 지원됩니다. 크로스 플랫폼 파일 센서(notify)가 제공되며, Linux 전용 기능(fanotify, process kill, iptables)은 #[cfg(target_os = "linux")]로 안전하게 격리되어 있습니다.
-            </div>
+            <div class="faq-answer" data-i18n="faq4_a">v0.2.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다.</div>
           </div>
         </div>
       </div>
@@ -464,7 +432,7 @@ Active Threats: 0 Critical | 1 Resolved</div>
             <img src="images/logo.svg" alt="Argos AI Security Logo" width="32" height="32">
             <span>Argos AI Security</span>
           </a>
-          <p data-i18n="footer_tagline">AI 기반 Linux 서버 실시간 탐지·차단·복구 보안 플랫폼</p>
+          <p data-i18n="footer_tagline">차단·정상본 복구·사건 근거를 검증하는 Linux 보안 플랫폼</p>
           
           <!-- Subtle Contact Link requested by user -->
           <div class="contact-inquiry">
@@ -499,7 +467,9 @@ Active Threats: 0 Critical | 1 Resolved</div>
             <li><a href="https://github.com/hkjang/ArgosAISecurity" target="_blank" rel="noopener">GitHub Repo</a></li>
             <li><a href="REQUIREMENTS.md" target="_blank">REQUIREMENTS.md</a></li>
             <li><a href="ARCHITECTURE.md" target="_blank">ARCHITECTURE.md</a></li>
-            <li><a href="SOURCE_CODE_ANALYSIS.md" target="_blank">Source Analysis</a></li>
+            <li><a href="#documentation">문서 모음</a></li>
+            <li><a href="https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.2.0">v0.2.0 Release</a></li>
+            <li><a href="PLATFORM_VALIDATION.md">검증 기록</a></li>
           </ul>
         </div>
       </div>

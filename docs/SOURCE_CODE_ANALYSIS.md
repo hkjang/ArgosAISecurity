@@ -1,443 +1,147 @@
-# Argos AI Security - 소스 코드 분석 및 아키텍처 상세 명세서
+# Argos AI Security 소스 코드 안내
 
-이 문서는 AI 기반 Linux 서버 보안 플랫폼인 **Argos AI Security**의 전체 소스 코드를 심도 있게 분석하고 아키텍처 및 내부 핵심 알고리즘의 작동 메커니즘을 상세히 기술한 시스템 명세서입니다.
+기준: **v0.2.0 (`0a3fc4c`), 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
 
----
+## 워크스페이스 입구
 
-## 1. 개요 및 설계 철학
+[Cargo.toml](../Cargo.toml)은 Rust 2021·최소 Rust 1.86과 공통 의존성을 정의한다. 아래 11개 크레이트 중 마지막 세 개가 실행 파일이다.
 
-Argos AI Security는 Linux 시스템에서 발생하는 다양한 파일 이벤트 및 프로세스 실행 이벤트를 실시간으로 모니터링하여 랜섬웨어, 비정상 행위, 권한 상승 등의 위협을 탐지하고 즉각 대응(프로세스 차단 및 네트워크 격리)하며 복구(롤백)하는 종합 EDR/안티 랜섬웨어 솔루션입니다. 
+| 크레이트 | 먼저 읽을 파일 |
+| --- | --- |
+| `argos-common` | [event.rs](../crates/argos-common/src/event.rs), [config.rs](../crates/argos-common/src/config.rs) |
+| `argos-sensor` | [lib.rs](../crates/argos-sensor/src/lib.rs), [fanotify.rs](../crates/argos-sensor/src/fanotify.rs), [procmon.rs](../crates/argos-sensor/src/procmon.rs), [health.rs](../crates/argos-sensor/src/health.rs) |
+| `argos-detect` | [lib.rs](../crates/argos-detect/src/lib.rs), [scorer.rs](../crates/argos-detect/src/scorer.rs), [multi_window.rs](../crates/argos-detect/src/multi_window.rs), [entropy.rs](../crates/argos-detect/src/entropy.rs) |
+| `argos-storage` | [lib.rs](../crates/argos-storage/src/lib.rs), [evidence.rs](../crates/argos-storage/src/evidence.rs), [outbox.rs](../crates/argos-storage/src/outbox.rs), [response_audit.rs](../crates/argos-storage/src/response_audit.rs) |
+| `argos-policy` | [lib.rs](../crates/argos-policy/src/lib.rs), [trust.rs](../crates/argos-policy/src/trust.rs), [simulation.rs](../crates/argos-policy/src/simulation.rs) |
+| `argos-response` | [lib.rs](../crates/argos-response/src/lib.rs), [isolate.rs](../crates/argos-response/src/isolate.rs) |
+| `argos-recovery` | [lib.rs](../crates/argos-recovery/src/lib.rs), [retention.rs](../crates/argos-recovery/src/retention.rs) |
+| `argos-brain` | [lib.rs](../crates/argos-brain/src/lib.rs) |
+| `argos-agent` | [main.rs](../crates/argos-agent/src/main.rs), [backup_worker.rs](../crates/argos-agent/src/backup_worker.rs), [reporter.rs](../crates/argos-agent/src/reporter.rs), [semantic.rs](../crates/argos-agent/src/semantic.rs) |
+| `argos-central` | [main.rs](../crates/argos-central/src/main.rs), [dashboard.html](../crates/argos-central/src/dashboard.html) |
+| `argos-cli` | [main.rs](../crates/argos-cli/src/main.rs), [investigation.rs](../crates/argos-cli/src/investigation.rs), [reports.rs](../crates/argos-cli/src/reports.rs), [evidence_package.rs](../crates/argos-cli/src/evidence_package.rs) |
 
-### 핵심 설계 철학
-1. **메모리 안전성 및 고성능 (Rust 기반)**
-   - 대량의 시스템 이벤트를 초당 수만 건 이상 안전하고 저지연으로 처리하기 위해 전체 데몬과 유틸리티를 Rust로 구현하였습니다.
-2. **이벤트 파이프라인의 격리 및 확장성**
-   - 센서 모듈, 탐지 엔진, 로컬 저장소, 백업/복구 솔루션, 대응 엔진 등을 크레이트(Crate) 단위로 모듈화하여 상호 의존성을 최소화하고 확장성을 극대화하였습니다.
-3. **오탐 방지 및 단계적 차단**
-   - 정상 시스템 작업(백업, 로그 로테이션 등)으로 인한 업무 중단 리스크를 최소화하기 위해 탐지 강도 및 점수 기반의 세밀한 정책 제어, 자동 차단의 기본 비활성화 옵션을 제공합니다.
-4. **AI 기술과의 RAG 기반 융합**
-   - Anthropic Claude API를 활용해 실제 탐지된 저수준 시스템 로그만을 근거로 명확한 원인을 요약 및 분석하는 AI Threat Summary 및 Copilot 기능을 내장하였습니다.
+## 1. 공통 데이터와 수집 신원
 
----
+`FileEvent`는 시각·PID·경로·행위·크기·엔트로피에 더해 선택적 `process`와 `content`를 담는다. `FileProcessContext`의 실행 파일·유효 UID·시작 ticks·부팅 ID는 승인 작업과 대응 신원 판단의 근거다. `ancestors`에는 당시 확인한 최대 4단계 부모 `ProcessIdentity`를 저장한다. 과거 맥락을 현재 `/proc`로 채우지 않는다.
 
-## 2. 아키텍처 및 데이터 흐름
+`ContentEvidence`는 관측 시각·파일 크기·총 표본 예산·실제 읽은 바이트·형식 추정·위치별 엔트로피와 이전 관측 대비 차이를 저장한다. `complete`는 읽은 바이트 수가 관측 파일 크기와 같은지를 나타내며, 큰 파일의 부분 표본에서는 false다. 내용이 정상이라는 판정은 아니다. `ProcessEvent`는 실행 신원 외에 선택적 `ProcessCredentials`로 real/effective/saved-set/filesystem UID·GID와 capability 집합을 저장한다. 이전 자료나 미수집 값은 `None`으로 남긴다.
 
-Argos 에이전트는 독립된 컴포넌트들이 비동기 채널을 통해 유기적으로 연결된 파이프라인 구조를 가집니다.
+`spawn_sensor(kind, paths, tx)`는 notify와 fanotify를 선택한다. notify는 기본값이며 PID를 모르면 0이다. fanotify는 Linux에서 `FAN_MODIFY`·`FAN_CLOSE_WRITE`를 받고 마운트 마크 후 감시 경로를 필터링한다. 삭제·이름 변경 등 모든 `FileAction`을 이 백엔드가 수집한다고 가정하면 안 된다. `/proc` 모니터는 폴링 전후 신원을 확인하지만 매우 짧은 실행과 폴링 사이 변화는 놓칠 수 있다.
 
-```mermaid
-flowchart TD
-    subgraph HostSystem [감시 대상 호스트 시스템]
-        WP[감시 대상 경로 /home 등]
-        PROC[Linux /proc 파일시스템]
-    end
+## 2. 에이전트 시작과 이벤트 처리
 
-    subgraph SensorCrate [argos-sensor]
-        NS[Notify 센서: 크로스플랫폼]
-        FS[Fanotify 센서: Linux 전용, 원인 PID 추출]
-        PM[Procmon 센서: /proc 폴링 기반 exec 감시]
-    end
+`argos-agent/main.rs::main()`의 순서는 다음과 같다.
 
-    subgraph AgentDaemon [argos-agent 데몬]
-        PL[이벤트 처리 파이프라인]
-        DE[DetectionEngine: 탐지 엔진]
-        BS[BehaviorScorer: 행위 스코어러]
-        RS[Responder: SIGKILL / SIGSTOP 대응]
-    end
+1. `AgentConfig::load()` 후 서명 정책이 설정되어 있으면 `argos_policy::activate_file()`을 호출한다. 실패는 시작 실패로 전파하며 로컬 기본 탐지 설정으로 우회하지 않는다.
+2. `validate_configuration()`으로 센서·점수·승인·집계 설정을 검사하고 도달 불가능한 임계치를 경고한다.
+3. 감시 경로를 정규화하고 이벤트 DB·탐지 엔진·의미 분석·선택적 내용 샘플러를 만든다. 백업 디렉터리가 감시 경로 안에 있으면 거부한다.
+4. 백업/보존 및 중앙 보고 작업자를 시작하고 파일 큐 8192건·프로세스 큐 1024건을 연결한다.
+5. `tokio::select!`에서 파일·프로세스 이벤트와 30초 상태 기록을 처리한다. 파일 센서 채널 종료는 보호 저하와 오류 종료로 나타낸다.
 
-    subgraph StorageCrate [argos-storage]
-        DB[(SQLite WAL)]
-    end
+`process_event()`의 실제 처리 순서는 아래와 같다.
 
-    subgraph RecoveryCrate [argos-recovery]
-        BStore[BackupStore: 내용 주소 지정 저장소]
-    end
-
-    subgraph ExternalServices [외부 연동 서비스]
-        CentralServer[Argos Central: 중앙관리 서버]
-        ClaudeAPI[Anthropic Claude API]
-    end
-
-    %% 연결 관계
-    WP -->|파일 생성/수정/삭제| NS
-    WP -->|파일 수정/쓰기 완료| FS
-    PROC -->|프로세스 기동| PM
-
-    NS & FS -->|FileEvent| PL
-    PM -->|ProcessEvent| PL
-
-    PL -->|1. 엔트로피 계산 및 로그 기록| DB
-    PL -->|2. 쓰기/생성 이벤트 시 원본 백업| BStore
-    PL -->|3. 스코어링 관찰 요청| DE
-    DE -->|행위 모델 평가| BS
-    BS -->|4. 임계치 초과 시 탐지 생성| PL
-
-    PL -->|5-1. 위험 프로세스 자동 차단| RS
-    PL -->|5-2. 비동기 백그라운드 전송| CentralServer
-
-    %% CLI 연결
-    CLI[argos CLI] <-->|DB 읽기 전용 조회 & 백업 복구 수행| DB & BStore
-    CLI <-->|자연어 질문 & 위협 요약 분석| ClaudeAPI
+```text
+필요한 내용 표본 수집
+  → DetectionEngine::evaluate
+  → SemanticMonitor::observe의 추가 알림 병합
+  → 정책 기간 재검사 + 매 이벤트 대응 판단 + 필요 시 신원 확인 종료
+  → 대응 결과 감사 저장
+  → 파일 이벤트 저장
+  → Create/Modify 백업 큐에 비차단 삽입
+  → 기본/추가 탐지 각각 기록 + 전송/보존 요청 트랜잭션
 ```
 
-### 데이터 파이프라인 흐름
-1. **이벤트 수집 (Sensor)**: 파일 시스템 감시 백엔드(`notify`/`fanotify`) 및 프로세스 모니터가 이벤트를 발생시키고 Tokio MPSC 채널에 전송합니다.
-2. **엔트로피 측정 및 로깅 (Agent & Storage)**: 파일 수정(`Modify`) 이벤트 발생 시 대상 파일의 전반부(64KB) 바이너리 엔트로피를 계산하고 SQLite 데이터베이스에 기록합니다.
-3. **내용 주소 지정 백업 (Recovery)**: 파일이 수정되거나 생성되기 직전 원본 상태의 파일을 고유한 SHA-256 해시값 기반의 객체 저장소에 백업합니다.
-4. **위협 탐지 (Detect)**: `DetectionEngine` 내의 `BehaviorScorer`가 실시간으로 프로세스(혹은 호스트)별 10초 슬라이딩 윈도우 내 파일 변경량, 고엔트로피 쓰기 비율, Rename/Delete churn 비율을 계산하여 점수를 산출합니다.
-5. **대응 및 보고 (Response & Central)**: 점수가 위험 임계치를 초과할 시 `Responder`를 통해 위협 프로세스를 강제 종료(`SIGKILL`)하거나 일시 정지(`SIGSTOP`)하며, 중앙관리 서버(`Argos Central`)로 탐지 이벤트를 실시간 보고합니다.
+대응은 알림 재보고 여부·전체 파일 백업·중앙 HTTP 완료를 기다리지 않는다. 다만 내용 표본·의미 분석·로컬 SQLite·대응 실행은 동기 구간을 포함한다. `guard_policy_time()`은 실행 중 서명 정책이 기간을 벗어나면 자동 대응을 끄고 해당 실행에서 다시 켜지 않도록 한다.
 
----
+`response_actions`에는 `succeeded`, `failed_or_unconfirmed`, `rejected`, `observed_threshold`를 구별해 기록한다. 파일 이벤트·대응 감사·각 탐지는 별도 저장 작업이다. 프로세스를 종료한 뒤 DB가 실패할 수 있으므로 탐지 행만으로 대응 성공이나 감사의 완전성을 추정하지 않는다.
 
-## 3. 서비스 및 컴포넌트별 상세 명세
+## 3. 탐지 API와 점수
 
-Argos 시스템을 구성하는 11개 크레이트 및 실행 프로그램 단위의 상세 설명입니다.
+`DetectionEngine::with_sensor(config, sensor)`로 센서 종류를 지정하고 `evaluate(&FileEvent)`를 사용한다. 반환 `Evaluation`은 `score`, `pid`, `eligible`, `alert`, `additional_alerts`, `approved_change_id`, `evidence_truncated`를 제공한다. `block_candidate()`는 임계치 후보, `should_block()`는 자동 대응 설정까지 반영한다. 호환 API `observe()`는 기본 `alert`만 반환하므로 에이전트 대응과 추가 알림 처리를 대신할 수 없다.
 
-```
-Argos AI Security Workspace
-  ├── [실행 프로그램 (Daemon/CLI/Server)]
-  │     ├── argos-agent   (백그라운드 에이전트 서비스)
-  │     ├── argos-cli     (관리자 명령행 도구)
-  │     └── argos-central (중앙 서버 및 웹 대시보드)
-  └── [라이브러리 컴포넌트]
-        ├── argos-common   (공통 설정 및 자료형)
-        ├── argos-sensor   (커널/OS 이벤트 센서)
-        ├── argos-detect   (위협 행위 스코어러 및 탐지 엔진)
-        ├── argos-storage  (SQLite WAL 데이터 로깅 스토어)
-        ├── argos-response (프로세스 차단 및 iptables 격리 엔진)
-        ├── argos-recovery (내용 주소 백업 및 무결성 원자 복구)
-        └── argos-policy   (Ed25519 서명 정책 무결성 유닛)
-```
+`scorer.rs`의 기본 점수는 대량 변경 최대 40점, 엔트로피 최대 notify 35/fanotify 60점, 이름 변경·삭제 notify 최대 25점이다. 기본 시간창 10초·최소 변경 파일 5개·대량 변경 기준 30개·탐지 40점·차단 80점이며, 자동 차단 기본값은 false다. 알림 재보고 억제와 점수 평가는 분리되어 있다.
 
----
+승인 작업은 기간·경로·실행 파일·유효 UID·시작 신원을 모두 확인한다. `adjusted_rules`에 이름을 적은 규칙만 조정하며 범위 밖 증거는 유지한다. 미끼 파일의 수정·삭제·이름 변경은 95점이며 일반 승인으로 사라지지 않는다.
 
-### 3.1. 에이전트 서비스: `argos-agent`
-호스트 시스템에 상주하며 전체 탐지 및 대응 라이프사이클을 통제하는 systemd 데몬 프로세스입니다.
+`multi_window.rs`는 선택적 여러 시간창의 동일 인스턴스·계정/경로·보호 경로·부모 계보를 집계한다. 동일 인스턴스의 근거만 개별 대응 점수에 참여한다. 여러 인스턴스의 합산 알림은 `pid=0`과 범위·참여 PID를 표시하고 `additional_alerts`로 전달한다. 이벤트·그룹·경로 길이 상한과 시각 역전 등으로 근거가 빠지면 표시하며, 재생도 이벤트 시각에 따라 같은 로직을 실행한다.
 
-* **역할 및 책임**:
-  - 설정 구성 로드 및 유효성 검증.
-  - 감시 대상 경로 자동 감지 및 시동 시 원본 파일들을 1차 전수 백업(`baseline_backup`).
-  - 파일 시스템 센서 및 프로세스 센서 기동.
-  - Tokio 비동기 루프 기반 멀티플렉싱 이벤트 분배 처리.
-  - 로컬 이벤트 데이터 로깅 및 CAS 백업 릴레이.
-  - 탐지 시 차단 조치 실행 및 중앙 서버 백그라운드 전송 보고.
-* **주요 소스 파일**:
-  1. **[main.rs](file:///d:/project/ArgosAISecurity/crates/argos-agent/src/main.rs)**:
-     - `main`: 비동기 진입점. CLI 아규먼트로 설정 파일 경로(기본: `argos.toml`)를 받아 `AgentConfig::load`를 실행합니다.
-     - 서명 정책 설정(`policy.path`)이 있는 경우, [argos-policy](file:///d:/project/ArgosAISecurity/crates/argos-policy/src) 라이브러리를 사용해 공개키 대조 검증을 수행하고, 정상 통과 시 탐지 및 대응 구성 매개변수를 교체합니다.
-     - `tokio::select!` 매크로를 이용해 파일 감시 채널(`rx`), 프로세스 감시 채널(`proc_rx`), 그리고 Ctrl+C 종료 시그널 감지를 비동기 병렬 대기 및 라우팅합니다.
-     - `process_event`: 수신한 개별 `FileEvent`에 대해 파일 수정 시 앞부분 64KB의 엔트로피를 계산하여 구조체에 바인딩하고, SQLite DB와 백업CAS에 기록한 뒤 `DetectionEngine::observe`를 실행합니다. 스코어가 차단 임계치(`block_score`)를 넘어서면 차단 작업을 유발합니다.
-     - `baseline_backup`: 에이전트 기동 시 감시 경로 내의 기존 파일들을 스택 기반 디렉터리 순회(DFS) 방식으로 전수 조사해 CAS에 최초 버전을 저장합니다.
-  2. **[reporter.rs](file:///d:/project/ArgosAISecurity/crates/argos-agent/src/reporter.rs)**:
-     - 비동기 Tokio 컨텍스트와 무관하게 동작하는 OS Native 백그라운드 전송 스레드를 구동합니다.
-     - `spawn` 함수가 호출되면 채널 쌍(`std::sync::mpsc::channel`)을 만들어 송신단(`Sender<Detection>`)을 에이전트 메인 제어 루프에 제공하고, 수신 스레드(`argos-reporter`)를 실행합니다.
-     - 스레드 구동 즉시 HTTP REST API(`POST /api/v1/agents/register`)를 통해 중앙서버에 호스트 정보 등록을 요청하고, 채널을 통해 전달되는 탐지 이벤트를 `POST /api/v1/detections` 엔드포인트로 무제한 릴레이합니다.
+`entropy.rs::ContentSampler::new(total_bytes, max_files, history_secs)`와 `observe(path, observed_at_ms)`는 총 예산을 앞·중간·끝에 나눈다. 기본 64 KiB, 설정 최대 1 MiB이며 별도의 앞부분 엔트로피 읽기를 중복 수행하지 않는다. 비교 가능한 이전 표본의 증가량을 사용하고 압축 형식의 높은 초기 엔트로피만으로 신호를 만들지 않는다. 표본 이력은 정상본 저장소가 아니며 특정 PID가 작성한 바이트의 증명도 아니다. 구성과 경계는 [탐지 기능](FEATURE_DETECTION.md)에 있다.
 
----
+`semantic.rs`는 별도 `[semantic].files`의 SSH·sudoers·cron·systemd 내용을 제한적으로 비교한다. 원문 비밀값을 알림에 넣지 않으며 의미 변화는 추가 탐지로 기록한다. 읽기/분석 누락은 상태로 구별한다. 완전한 Linux 설정 평가나 실제 권한 상승 성공 판정은 아니다.
 
-### 3.2. 관리자 명령행 도구: `argos-cli`
-로컬 호스트의 보안 상태 진단, 이벤트 감사, 수동 파일 원복, AI 기반의 위협 분석 조회를 총괄적으로 수행하는 관리자 전용 명령어 도구입니다.
+## 4. 정책 신뢰와 재생
 
-* **역할 및 책임**:
-  - 에이전트 상태 및 통계 모니터링 (`status`).
-  - 로컬 SQLite DB에서 수집 이벤트 및 위협 정보 덤프 출력 (`events`, `threats`).
-  - 특정 탐지 식별자에 관한 Claude API 요약 분석 요청 (`explain`).
-  - 대화형 코파일럿을 이용한 자연어 시스템 감사 진행 (`ask`).
-  - 특정 시점으로 파일 무결성 원자적 원복 수행 (`restore`).
-  - 임의 디렉터리 내 암호화 의심 고엔트로피 파일 긴급 스캔 (`scan`).
-  - iptables 기반 네트워크 격리 활성화/해제 (`isolate`).
-  - Ed25519 관리 정책 서명키 생성 및 검증키 기반 정책 검증 테스트 (`policy`).
-* **주요 소스 파일**:
-  1. **[main.rs](file:///d:/project/ArgosAISecurity/crates/argos-cli/src/main.rs)**:
-     - `clap` 서브커맨드 구조를 지닌 `Cli` 및 `Command` 열거형을 선언하여 CLI 명세를 선언적으로 구성했습니다.
-     - `open_store`: 에이전트가 가동 중이더라도 동시 조회가 가능하도록 SQLite DB를 `open_readonly` 플래그를 이용해 독자적으로 열어서 통계를 조회합니다.
-     - `cmd_explain`: 선택한 탐지 ID의 레코드를 확보한 뒤, 탐지 시각 기준 10초 윈도우 전후의 로컬 파일 시스템 이벤트 로그를 SQLite에서 추출하여 `DetectionContext`를 작성한 뒤, Anthropic Claude API로 사고 분석 보고서 생성을 요청합니다.
-     - `cmd_restore`: 백업 CAS 디렉터리에서 타겟 파일의 백업 버전 이력을 SQLite `index.db`에서 찾아 나열하거나(`--list` 활성 시), 검증된 무결성 CAS 백업 파일을 강제 rename 하여 기존 파일을 덮어씁니다.
-     - `cmd_ask`: 호스트 구성 정보 및 최근 탐지, 파일 쓰기 로그, 프로세스 실행 로그를 한곳에 취합한 RAG(검색 증강 생성)용 덤프 컨텍스트를 구성한 후 사용자 자연어 질의와 함께 Claude API에 질문을 포워딩합니다.
-     - `cmd_isolate`: `argos-response` 크레이트 내 `isolate` 모듈을 연동해 iptables 차단 체인을 동적 빌드 및 릴레이합니다.
+| API | 역할과 주의점 |
+| --- | --- |
+| `sign_bytes` / `verify_bytes` | Ed25519 원문 바이트 서명·검증 |
+| `activate_file` | 제한된 일반 파일 읽기, 동일 바이트 검증·파싱, 메타데이터·설정·영속 버전 검사와 수락/감사 트랜잭션 |
+| `read_state` / `load_active_policy` | 저장된 마지막 수락 상태·설정 조회 |
+| `load_trusted` | 신뢰 키·기간·대상·설정의 읽기 전용 사전 검사. 영속 수락을 대신하지 않음 |
+| `simulate` | 읽기 전용 이벤트 DB의 기간·상한 내 자료로 기준/후보 정책 비교 |
 
----
+정책 원문의 키 ID는 로컬 `trusted_keys`에 있어야 한다. 동일 버전의 다른 바이트와 다운그레이드는 거부하고, 동일 버전·동일 해시 재시작도 기간·대상·키를 다시 확인한다. 롤백은 과거 수락 버전·해시·설정 및 미사용 승인 ID를 참조하는 더 높은 새 버전이다. 상태 디렉터리/파일 권한, 서명 파일 종류·크기, 감사 실패의 트랜잭션 취소도 `trust.rs`에서 처리한다. 로컬 관리자/root의 상태 전체 삭제·디스크 롤백과 외부 승인자 인증은 처리하지 않는다.
 
-### 3.3. 중앙관리 서버 및 대시보드: `argos-central`
-수많은 호스트에 흩어진 Argos 에이전트로부터 등록 신호 및 위험 위협 정보를 비동기 수집하여 모니터링 화면을 표출해 주는 원격 관리 서버입니다.
+`simulation.rs`는 두 정책의 활성 시간창 중 가장 긴 준비 구간을 포함한다. 저장된 엔트로피·내용 표본·프로세스 맥락만 사용하고 시각·DB ID 순으로 재생한다. 현재 파일·`/proc` 접근, 실제 종료, 정책 적용을 하지 않는다. 집계 알림·개별 임계치·프로세스 인스턴스별 예상 대상과 근거 ID·조회 누락을 구별한다. 실제 차단 뒤 달라질 이벤트 흐름이나 다른 위치/크기의 내용 표본을 재현하지 못한다. [정책 기능](FEATURE_POLICY.md)이 운영 절차를 설명한다.
 
-* **역할 및 책임**:
-  - 에이전트 노드 등록(`/api/v1/agents/register`)과 주기적인 생존·보호 상태 관리(`/api/v1/agents/heartbeat`).
-  - 탐지 위협 정보 수집 및 다중 조회 API 제공 (`/api/v1/detections`).
-  - 관리자 조회 토큰과 에이전트별 등록·수집 토큰을 분리한 Bearer 인증.
-  - 전용 HTML 웹 현황판 화면 배포.
-* **주요 소스 파일**:
-  1. **[main.rs](file:///d:/project/ArgosAISecurity/crates/argos-central/src/main.rs)**:
-     - Axum 웹 서비스 진입점. `--listen`, `--db`, 관리자 토큰(`ARGOS_CENTRAL_TOKEN` 또는 `--token`), 에이전트별 토큰 JSON(`--agent-tokens`)을 읽습니다. 운영 모드에는 서로 다른 관리자·에이전트 토큰이 필요하며, 무인증 개발 모드는 `--development`와 loopback 주소로 제한합니다.
-     - 중앙 관제용 로컬 SQLite DB(`central.db`)를 별도로 초기화하고 `agents` 및 `detections` 관계형 테이블을 선언합니다.
-     - `authorize`: 조회 요청의 관리자 토큰을 검사합니다. `authorize_agent`는 등록·생존 신호·수집 요청의 `agent_id`에 해당하는 전용 토큰을 검사합니다. 대시보드 HTML과 `/healthz`는 공개되지만 실제 데이터 조회에는 관리자 인증이 필요합니다.
-     - `register_agent`: 새로운 에이전트의 ID 및 호스트명 등록 신호를 수신해 SQLite에 기입하거나 업데이트합니다.
-     - `ingest_detection`: 보고받은 감염 노드의 탐지 정보를 기록하고, 해당 에이전트의 최근 통신 수신 시간(`last_seen_ms`)을 실시간 갱신합니다.
-     - `/` 엔드포인트 접근 시 HTML 파일([dashboard.html](file:///d:/project/ArgosAISecurity/crates/argos-central/src/dashboard.html))을 메모리 스트림으로 직접 내려보내 브라우저에 배포합니다.
-  2. **[dashboard.html](file:///d:/project/ArgosAISecurity/crates/argos-central/src/dashboard.html)**:
-     - 단일 정적 웹 문서로 구성되었습니다. 순수 CSS 스타일 디자인과 바닐라 JavaScript Fetch API를 활용해 초고속 렌더링이 가능하게 설계되었습니다.
-     - 5초 간격의 클라이언트 폴링 로직을 지니며 최근 차단/탐지 노드 통계를 비동기 갱신해 출력합니다.
+## 5. 이벤트 저장과 비동기 작업
 
----
+`EventStore::open()`은 SQLite WAL 스키마를 초기화/이전하며 이벤트 DB 동기화는 `NORMAL`이다. CLI 조회는 `open_readonly()`를 사용한다. 과거 DB에 신원·내용 JSON이 없으면 읽을 때 미확인 값으로 반환하며 조회만으로 마이그레이션하지 않는다.
 
-### 3.4. 공통 설정 및 자료형 라이브러리: `argos-common`
-시스템 내에서 공유되는 핵심 구성 정보와 공통 이벤트 규격을 한곳에 보관하는 척추 컴포넌트입니다.
+| 테이블/모듈 | 용도 |
+| --- | --- |
+| `file_events`, `process_events`, `detections` | 기본 조회 열과 이벤트 JSON으로 원본 맥락·표본 및 탐지를 보존 |
+| `response_actions` / `response_audit.rs` | 대응 결과와 실제 프로세스 신원, `insert_response_result`·`response_results` |
+| `detection_outbox`, `delivery_counters` | 고정 전달 ID, 시도·성공·실패 통계 |
+| `retention_jobs`, `retention_counters` | 탐지별 보존 요청, 재시도·완료·상한 초과 통계 |
+| `evidence.rs` | `EvidenceQuery`, `EvidencePage`, `EvidenceBundle`, `query_evidence` |
 
-* **역할 및 책임**:
-  - 공통 설정값 및 파일 경로 변환 함수 수록.
-  - 에이전트 감시 정보 구조체 정의.
-  - 파일 시스템 및 프로세스 공통 데이터 모델 제공.
-* **주요 소스 파일**:
-  1. **[config.rs](file:///d:/project/ArgosAISecurity/crates/argos-common/src/config.rs)**:
-     - `AgentConfig`: 에이전트 데몬 설정 정보의 루트 매핑 대상입니다.
-     - `DetectionConfig`: 윈도우 폭(`window_secs`), 대량 쓰기 조건 개수(`mass_change_threshold`), 최소 판단 변경 건수(`min_changed_files`), 암호화 의심 엔트로피 스펙트럼 기준(`entropy_threshold`) 등의 탐지 필터 파라미터를 담고 있습니다.
-     - `ResponseConfig`: 자동 차단 실행 여부(`auto_block`) 및 행동 대응 점수 커트라인(`block_score`)을 포함합니다.
-     - `BackupConfig`: CAS 디렉터리 경로 및 단일 파일 최대 용량(`max_file_bytes`), 보존 수량 제한 정보를 보관합니다.
-  2. **[event.rs](file:///d:/project/ArgosAISecurity/crates/argos-common/src/event.rs)**:
-     - `FileAction`: 개별 파일 시스템 이벤트의 델타 액션 형식을 표현하는 열거형입니다.
-     - `FileEvent`: 커널 드라이버나 파일 시스템 모니터가 내보내는 가장 기본적인 로우 데이터 모델입니다.
-     - `ProcessEvent`: 프로세스 계층의 라이프사이클을 매핑하기 위해 실행 사용자 UID, 부모 PID(PPID), 실행 명령어 전체 인자를 수록합니다.
-     - `Detection`: 행위 점수가 합산된 후 선언되는 위협 탐지 정보의 결과 구조체입니다.
+`record_detection(detection, agent_id, pin_recovery)`는 탐지와 필요한 outbox·보존 요청을 같은 트랜잭션에 쓴다. 보존 큐가 10,000건을 넘으면 탐지 자체는 유지하고 요청 누락을 계수한다. `query_evidence()`는 시작·종료 포함, 선택적 PID, 종류별 1~10,000건 상한을 검사한다. 파일·프로세스·탐지와 전체 건수는 같은 읽기 스냅샷이며 대응 결과 조회는 별도 스냅샷이다. 종류별 ID가 겹칠 수 있어 근거에는 테이블 종류도 표시한다.
 
----
+`backup_worker.rs::BackupWorker`는 백업과 사건 보존에 별도 스레드를 둔다. 백업 큐는 메모리 상한과 비차단 삽입을 사용하고 시작 베이스라인도 작업자에서 진행한다. 지연 후 읽은 내용을 이벤트 과거 시각의 백업으로 표시하지 않고 실제 수집 시각을 사용한다. 논리 파일 크기에 따른 대기는 평균 처리 예산이며 물리 디스크 I/O 상한이 아니다. 이 메모리 큐는 영속 큐가 아니다.
 
-### 3.5. 파일 및 프로세스 감시 센서: `argos-sensor`
-호스트 OS 커널 레벨 및 파일 시스템 상에서 일어나는 모든 기초 이벤트를 저수준 후킹 및 인터셉트하여 파이프라인으로 전송해 주는 물리 센서 모듈입니다.
+사건 보존 작업자는 이벤트 DB 요청을 읽은 뒤 DB 읽기 잠금을 풀고 백업 DB에서 탐지 경로의 탐지 이전 정상본을 고정한다. 사건/버전 고유 참조로 부분 성공과 재시작을 처리한다. 정상본이 없거나 저장소에 접근하지 못하면 실패·재시도 상태를 표시한다. 보존 작업 대기는 다음 이벤트의 판단 경로에서 발생하지 않는다.
 
-* **역할 및 책임**:
-  - 디렉터리 재귀 감시를 통한 실시간 변경 탐지.
-  - 리눅스 fanotify 바인딩 및 파일 수정 발생의 원인 PID 디코딩.
-  - `/proc` 스캔 기반 프로세스 생명 주기 추적.
-* **주요 소스 파일**:
-  1. **[lib.rs](file:///d:/project/ArgosAISecurity/crates/argos-sensor/src/lib.rs)**:
-     - `spawn_sensor` 유틸리티 함수를 제공하여 상위 에이전트가 백엔드 내부 상세 동작 방식을 알지 못해도 크로스플랫폼 `notify` 및 리눅스 전용 `fanotify` 센서를 일관된 인터페이스로 구동할 수 있도록 은닉화했습니다.
-     - `RecommendedWatcher` 인터페이스를 래핑하여 리눅스 계열이 아닌 환경에서도 파일 생성, 수정, 삭제, 이름 변경 이벤트를 콜백 함수로 가로챈 후 비동기 MPSC 채널 송신을 처리합니다.
-  2. **[fanotify.rs](file:///d:/project/ArgosAISecurity/crates/argos-sensor/src/fanotify.rs) (Linux 전용)**:
-     - `libc::fanotify_init` 및 `libc::fanotify_mark` 시스콜을 호출하여 마운트 단위(`FAN_MARK_MOUNT`)로 변경을 모니터링합니다.
-     - 수집 루프(`read_loop`) 내부에서, 수신된 이진 메타데이터 블록 내 `fd` 멤버를 추출하여 `/proc/self/fd/<fd>` 링크 대상을 역추적하는 `read_link` 기법을 통해 실제 감시 대상 경로에 포함되는 이벤트만 선별 여과(Prefix Filter)합니다.
-     - 이벤트 구조체 내 `pid` 변수를 활용해 쓰기 행위를 감행한 실제 공격자 프로세스 PID를 확보합니다.
-  3. **[procmon.rs](file:///d:/project/ArgosAISecurity/crates/argos-sensor/src/procmon.rs) (Linux 전용)**:
-     - 주기적인 `/proc` 폴링 스레드를 동작시켜 기동 중인 모든 프로세스의 PID 세트를 해시 셋(`HashSet<u32>`)에 보관하고 대조합니다.
-     - 신규 식별 프로세스가 드러날 경우 `/proc/<pid>/status` 파싱으로 PPID 및 UID 정보를 채우고, `/proc/<pid>/cmdline` 바이너리 내부의 Null 문자(`\0`)를 스페이스 문자로 치환 가공하여 실행 형태의 문자열을 복원합니다.
+`reporter.rs`는 용량 1의 깨우기 채널과 디스크 outbox를 사용한다. 전용 `std::thread`가 blocking HTTP를 수행하며 실패 시 1~60초 간격으로 재시도한다. 중앙 성공 응답 후에만 삭제하고 생존 신호는 탐지가 없어도 보낸다. 보장은 로컬 트랜잭션이 성공한 데이터에 한하며 센서 누락·디스크 고장을 복구하지 못한다.
 
----
+## 6. 복구·사건 보존·대응 실행
 
-### 3.6. 위협 탐지 분석 엔진: `argos-detect`
-로우 센서 이벤트 스트림을 관찰하여 랜섬웨어의 전형적인 공격 파일 훼손 동작을 실시간 스코어링하는 감시 두뇌부입니다.
+`BackupStore::backup()`은 읽은 현재 파일을 SHA-256 객체와 `index.db` 버전으로 보관한다. 시작 베이스라인도 `known_good=false`다. **변경 전 복사나 원자적 파일시스템 스냅샷을 구현한 함수가 아니다.**
 
-* **역할 및 책임**:
-  - 개별 프로세스 행동의 윈도우 수집 및 시간 경과 삭제 관리.
-  - Shannon 엔트로피 고속 계산.
-  - 위협 등급 판정 및 탐지 중복 발행 방지.
-* **주요 소스 파일**:
-  1. **[entropy.rs](file:///d:/project/ArgosAISecurity/crates/argos-detect/src/entropy.rs)**:
-     - `file_entropy`: 파일을 안전하게 읽기 전용으로 열어 최상단 바이너리 스트림 버퍼를 샘플링하고 `shannon_entropy` 함수로 인계합니다.
-     - `shannon_entropy`: 데이터의 바이트 배열을 카운팅(0~255 빈도수 배열)하여 점유 확률 분포 $P(x_i)$를 획득하고, 정보 이론에 입각한 총합 계산을 통해 엔트로피를 산출합니다.
-  2. **[scorer.rs](file:///d:/project/ArgosAISecurity/crates/argos-detect/src/scorer.rs)**:
-     - `BehaviorScorer`: 프로세스 PID별로 `VecDeque<WindowEntry>`를 메모리 맵 상에 분할하여 유지합니다.
-     - `observe`: 새로운 이벤트가 들어오면 기존 버퍼의 꼬리에 붙이고 설정된 윈도우 시간 범위(`window_secs`초 전 시점)보다 밀려난 헤드 부분의 오래된 데이터 엔트리는 메모리에서 해제합니다.
-     - 변경 파일 개수가 기본 임계 개수(`min_changed_files`)에 도달하지 않은 미미한 일상적 변경은 점수 검사 없이 즉시 종료해 오탐 가능성을 낮춥니다.
-     - `score`: 수식 계산 알고리즘에 기초하여 Mass(변경 확산도), Enc(파일 난수도), Churn(확장자 치환도)을 합산하여 0에서 100 사이의 실수를 결정합니다.
-     - **중복 억제 쿨다운**: 동일 PID에서 한번 탐지가 발행되면 윈도우 주기 동안 유사 점수의 탐지는 묵살하되, 가중치가 15점 이상 급증하는 중점 악화 상태(`ESCALATION_DELTA`) 감지 시에 한하여 쿨다운 필터를 바이패스하고 경고를 재발행합니다.
+| 복구 API | 의미 |
+| --- | --- |
+| `versions`, `mark_known_good`, `revoke_known_good` | 버전 조회, 근거를 남기는 정상 판정·취소 |
+| `recommend(path, before_ms)` | 정상본 중 최신 선택. 시각 지정 시 엄격히 그 이전 버전 |
+| `preview` | 해시를 검증한 후 별도 새 경로에 검토용 복원 |
+| `restore` | 정상본만 원래 경로에 복구. 임시 파일 작성·동기화 후 교체 |
+| `readiness`, `test_restore` | 관측 경로별 정상본·제외·시험 상태와 별도 복구 시험 |
+| `pin_version`, `pin_known_good_before` | 정상 판정과 별개인 사건 보존 참조 |
+| `release_pin`, `release_incident`, `retention_audit` | 승인 근거로 해제하고 이력 조회 |
+| `prune` | 경로별 미검토 버전 수 제한. 정상본과 활성 사건 고정 버전은 유지 |
 
----
+해시 일치는 내용의 정상성을 증명하지 않으며 사건 고정도 정상 판정을 부여하지 않는다. 복구 시 기존 일반 파일의 UID/GID를 보존하고 특수 권한 비트를 제거한다. ACL/xattr·애플리케이션 일관성·원본 상위 경로의 동시 교체까지 해결하는 스냅샷 복구는 아니다. [복구 기능](FEATURE_RECOVERY.md)에 정확한 거부 조건과 운영 경계를 둔다.
 
-### 3.7. SQLite WAL 로컬 데이터베이스: `argos-storage`
-에이전트가 기록하는 실시간 이벤트를 유실 없이 고속 영구 보관하고 CLI 도구가 비동기 방식으로 안전하게 감사 로그를 읽어갈 수 있도록 보장하는 저장 공간입니다.
+`argos-response`의 `Responder::execute()`는 조치 결과를 반환한다. 에이전트는 `ResponseAction::KillProcessInstance`로 PID·시작 ticks·부팅 ID를 검증하고 pidfd에 신호를 보내 종료를 확인한다. PID 0은 거부한다. 일반 프로세스 API와 별개로 실제 에이전트 자동 차단 경로의 신원 확인을 유지해야 한다.
 
-* **역할 및 책임**:
-  - 로컬 관계형 데이터베이스 테이블 및 최적 검색 인덱스 인프라 초기화.
-  - 초당 고빈도로 수집되는 로우 파일 이벤트 및 프로세스 감시 정보 인서트 처리.
-  - 위협 이력 보존 및 조회 인터페이스 제공.
-  - 시간대 범위 기반 로그 필터링 쿼리 제공 (AI RAG 분석용).
-* **주요 소스 파일**:
-  1. **[lib.rs](file:///d:/project/ArgosAISecurity/crates/argos-storage/src/lib.rs)**:
-     - `EventStore`: rusqlite 커넥션 구조체를 소유합니다.
-     - `open`: DB 커넥션을 획득한 직후 데이터베이스 파일의 쓰기 성능 및 읽기 성능을 보장하기 위해 `PRAGMA journal_mode=WAL` 및 `PRAGMA synchronous=NORMAL` 튜닝을 동기적으로 강제 적용합니다.
-     - `file_events` (시각, PID, 경로, 행위타입, 파일크기, 엔트로피), `detections` (시각, 룰명칭, 점수, 심각도, 요약문, PID, 경로 목록 JSON), `process_events` (시각, PID, 부모PID, 유저ID, 실행명칭, 명령어 인자) 테이블 스키마 선언부를 자동 수행합니다.
-     - `recent_events` / `recent_detections` / `recent_processes`: SQL 질의문 처리를 통해 CLI 출력 및 관제 서버 전달을 위한 고속 오프셋 페이징 버퍼 조회 인터페이스를 구현합니다.
-     - `events_between` / `processes_between`: AI Explainer 모듈이 시간대를 기반으로 로그를 슬라이스해 RAG Reranking 컨텍스트를 구성할 수 있도록 지원하는 범위 조회 함수입니다.
+`isolate.rs`의 `isolation_commands()`는 명령 계획을 만들고 `isolate_host()`는 적용·확인한다. IPv4/IPv6 각각 `ARGOS_INPUT`, `ARGOS_OUTPUT`, `ARGOS_FORWARD`를 사용하며 `ARGOS_ISOLATE`는 구형 체인 정리 대상이다. 명시적 관리 연결 외 기존 의심 연결의 패킷도 차단한다. 두 주소 계열의 부분 실패와 별도 네임스페이스 트래픽 한계를 성공으로 감추지 않는다. 호스트 방화벽 시험은 [별도 네임스페이스 스크립트](../scripts/test-isolation-netns.py)로 수행한다.
 
----
+## 7. 중앙·CLI·AI 조사
 
-### 3.8. 프로세스 제어 및 네트워크 격리: `argos-response`
-이상 징후 포착 순간 동작하여 위해 프로세스의 생명 주기를 제어하고 전체 네트워크 통신을 단절시키는 방어용 차단 유닛입니다.
+`argos-central`의 등록·생존 신호·탐지 POST는 에이전트별 토큰, 에이전트/탐지 GET은 관리자 토큰으로 인증한다. `(agent_id, delivery_id)` 중복 제거는 재전송에 적용한다. `/healthz`는 HTTP 서버 응답 확인이며 센서 정상 수집의 증명이 아니다. 중앙 전체 기능과 운영 TLS 구성은 [중앙 서비스](SERVICE_CENTRAL.md)에 있다.
 
-* **역할 및 책임**:
-  - 특정 위험 프로세스 기동 제거 시그널 송신.
-  - 비정상 아웃바운드 C2 연결 차단 및 롤백 해제 처리.
-* **주요 소스 파일**:
-  1. **[lib.rs](file:///d:/project/ArgosAISecurity/crates/argos-response/src/lib.rs)**:
-     - `ResponseAction` 열거형을 제공하여 시그널 동작(`KillProcess`, `SuspendProcess`)을 구체화합니다.
-     - `LinuxResponder`: Linux 시그널 시스템 콜 `libc::kill`을 안전하게 호출하여 대상 PID에 `SIGKILL`과 `SIGSTOP` 시그널을 주입합니다.
-     - `make_responder`: 정책이 `auto_block=false`이거나 Windows 등 다른 플랫폼 환경인 경우 실 작동 대신 경고 로그만 남겨 안전 지대를 구축해 주는 `DryRunResponder`를 자동 선택하도록 팩토리화했습니다.
-  2. **[isolate.rs](file:///d:/project/ArgosAISecurity/crates/argos-response/src/isolate.rs)**:
-     - `isolation_commands`: 네트워크 아웃바운드를 제한하는 iptables 일체형 커맨드 셋을 정적 구성합니다.
-     - 커스텀 차단 체인 `ARGOS_ISOLATE`를 신규 선언하고 루프백(`lo`), 기존 접속 유지를 위한 세션 연결(`ESTABLISHED,RELATED`)을 인가합니다.
-     - 에이전트 설정상의 관리 서버 주소를 분석하고 전송 유지를 위한 `ACCEPT` 규칙을 최우선 적용한 뒤, 마지막 규칙으로 `DROP` 규칙을 위치시켜 외부와의 연결을 완전 차절시킵니다.
-     - `release_commands`: 차단 해제 시 `OUTPUT` 체인에서 ARGOS_ISOLATE 점프 규칙을 탈거하고 체인을 비우며 소거하는 멱등성 명령을 구성합니다.
+CLI의 `Command`·`PolicyAction`·`RetentionAction`은 명령 정의의 기준이다. 조회·정책 재생과 달리 `restore`, `retention`, `isolate`, 미끼 파일 생성은 명시적 변경 작업이다. `policy verify`는 사전 검증, 실제 활성화는 에이전트 시작 경로다. `update`는 아직 미구현이다. 전체 명령은 [CLI 안내](SERVICE_CLI.md)를 따른다.
 
----
+`ThreatExplainer::from_config()`는 제공자·모델·주소·환경변수 키를 적용하고 `ask_investigation()` 등으로 조회한 근거와 대응 결과를 전달한다. AI는 자동 대응 결정을 실행하지 않는다. `investigation.rs::time_range()`는 지원하는 상대 기간 또는 명시적 epoch 구간을 처리하며 임의의 자연어 달력 표현을 모두 해석하지 않는다. `serve_mcp()`는 설정한 단일 로컬 DB의 `query_evidence`만 노출한다.
 
-### 3.9. CAS 백업 및 해시 검증 복구: `argos-recovery`
-탐지 이전 상태로 손상 파일의 무손실 원상 복구를 보장하며 불필요한 노후 버전 데이터 저장 공간을 관리하는 롤백 엔진입니다.
+`reports.rs`는 HTML 이스케이프와 독점 파일 생성으로 사건·복구 준비도 보고서를 쓴다. `evidence_package.rs::export()`·`verify()`는 마스킹된 근거·마지막 수락 정책 상태와 SHA-256 manifest를 만들고 검사한다. 해시 manifest는 발급자 서명이나 사건 당시 정책 실행 증명이 아니다. 모델 품질, 전체 호스트 간 상관관계와 사건 인과관계 확정은 별도 검증 대상이다.
 
-* **역할 및 책임**:
-  - 내용 주소 지정(Content-Addressed Storage) 중복 제거 백업 처리.
-  - 백업 버전 관계형 메타데이터 테이블 정보 보존.
-  - 타겟 시점 및 최신 상태의 해시 검증 원자 원복.
-  - 백업 보존 한계 버스팅 방지를 위한 정리(`prune`) 프로세스 구동.
-* **주요 소스 파일**:
-  1. **[lib.rs](file:///d:/project/ArgosAISecurity/crates/argos-recovery/src/lib.rs)**:
-     - `BackupStore`: CAS의 루트 경로와 백업 버전 인덱스를 기록할 독자적인 SQLite 커넥션(`index.db`)을 소유합니다.
-     - `backup`: 파일 수정 전 상태의 데이터를 읽어 SHA-256 해시를 도출하고, `objects/<해시앞2자리>/<해시>` 위치에 객체가 부재한 경우에 한하여 임시 파일 쓰기 및 rename 기법으로 중복을 제거하여 저장합니다. 직전 버전과 동일한 해시인 경우 백업 저장을 취소하고 None을 반환하여 IO 리소스를 세이브합니다.
-     - `restore`: 타겟 시각 이전 기준 최적 백업을 검색하고, 백업된 객체의 실제 파일 데이터 바이트 스트림을 로드한 뒤 SHA-256 해시를 즉석에서 재연산해 원본 무결성 여부를 크로스 체크합니다. 무결성이 입증된 파일은 `<원본경로>.argos-restore-tmp` 파일로 쓴 뒤 rename 시스콜로 본 파일을 덮어쓰는 원자적 복원을 마칩니다.
-     - `prune`: 윈도우 파일 시스템 감시 중인 디렉터리에 노후 버전이 과적되어 생기는 디스크 풀(Full) 에러를 막기 위해 경로당 설정 개수(`keep`)를 초과하는 레코드를 걷어내고, versions DB에 남겨진 참조 키값이 단 하나도 존재하지 않는 격리된 CAS 파일을 탐색해 실제로 지워줍니다.
+## 8. 수정 시 함께 확인할 시험
 
----
+| 변경 영역 | 연결된 검증 |
+| --- | --- |
+| 점수·예외·신원·집계 | `argos-detect`, `argos-policy`, `argos-agent`, `argos-response`의 회귀 테스트 |
+| 저장·전송·보존 | `argos-storage`, `argos-agent`, `argos-central`, `argos-recovery` 테스트 |
+| 정책 신뢰·롤백 | `argos-policy`의 파일 종류·기간·버전·대상·권한·동시 수락·감사 실패 테스트 |
+| 사용자 흐름 | [smoke-test.sh](../scripts/smoke-test.sh), [platform-smoke.py](../scripts/platform-smoke.py), [security-scenarios.py](../scripts/security-scenarios.py) |
+| 네트워크 격리 | [test-isolation-netns.py](../scripts/test-isolation-netns.py)의 IPv4/IPv6 실제 패킷 시험 |
 
-### 3.10. Ed25519 서명 정책 제어 장치: `argos-policy`
-서명된 탐지·대응 설정을 검증하고 정책 ID·버전·유효기간·배포 대상·키 ID에 따라 활성화를 제한합니다. 로컬 신뢰 설정과 상태 파일의 OS 접근 권한은 별도 신뢰 경계이며, 해당 파일을 변경할 수 있는 관리자/root를 방어하는 기능은 아닙니다.
-
-* **역할 및 책임**:
-  - Ed25519 디지털 키쌍 생산 지원.
-  - 임의 바이트 스트림에 관한 전자 서명 생성 및 유효성 대조.
-  - 암호 인증을 필한 클린 정책 구조체 역직렬화 반환.
-* **주요 소스 파일**:
-  1. **[lib.rs](file:///d:/project/ArgosAISecurity/crates/argos-policy/src/lib.rs)**:
-     - `Policy`: 정책 ID·키 ID·버전·발급/시작/만료 시각·대상 호스트/그룹·선택적 롤백 근거 및 탐지·대응 설정을 서명 대상에 포함합니다.
-     - `gen_keypair`: `rand_core::OsRng` 엔트로피 소스를 활용해 안전한 32바이트 Ed25519 비밀키와 대응하는 검증용 공개키를 무작위 생성합니다.
-     - `sign_file`: 지정된 비밀키 hex 값을 복원해 입력 정책 파일의 원시 바이트 전체를 서명한 후, 그 결과 서명 해시를 동명의 `.sig` 파일(예: `policy.toml.sig`)에 영구 저장합니다.
-     - `load_verified`: 같은 바이트를 서명 검증한 뒤 파싱하는 기본 API입니다. 운영 활성화는 `trust.rs`의 `activate_file`을 사용하여 로컬 신뢰 키·정책 메타데이터·영속 버전을 함께 검사합니다.
-     - `activate_file`: 수락 원문·설정·최대 버전과 감사 결과를 같은 SQLite 트랜잭션에 기록합니다. 설정된 정책의 검증 또는 저장 실패 시 에이전트 시작을 중단합니다. 롤백도 더 높은 새 버전과 기존 수락 정책에 대한 승인 근거를 요구합니다. [현재 운영 조건](FEATURE_POLICY.md)을 참고합니다.
-
----
-
-### 3.11. AI 분석 브레인 모듈: `argos-brain`
-시스템의 저수준 로그 데이터와 자연어 대화 모델 간의 징검다리 역할을 수행하며, 신뢰도 높은 인공지능 분석 환경을 지원하는 서포트 라이브러리 컴포넌트입니다.
-
-* **역할 및 책임**:
-  - Anthropic Messages API 전송 바인딩.
-  - 프롬프트 템플릿 제어 및 RAG 정보 융합.
-  - AI Hallucination(환각 현상) 제어를 위한 프롬프트 통제.
-* **주요 소스 파일**:
-  1. **[lib.rs](file:///d:/project/ArgosAISecurity/crates/argos-brain/src/lib.rs)**:
-     - `ThreatExplainer`: 환경 변수 `ANTHROPIC_API_KEY`를 로드하여 Claude API 블로킹 클라이언트를 기동합니다.
-     - `explain`: 수신받은 `DetectionContext`에 수록된 요약문 및 관련 파일들의 경로 리스트, 탐지 직전 시점부터 기록된 파일 I/O 이벤트를 프롬프트 문자열로 동적 합성합니다.
-     - RAG에 주입되는 정보 외부의 무리한 상상 및 보안 분석 추론을 엄단하는 통제 프롬프트(`SYSTEM_PROMPT`)를 인계하여 정확히 명시된 로그만을 근거로 분석 레포트를 도출합니다.
-     - `ask`: CLI copilot의 대화 입력을 받아 `CopilotContext` 상의 호스트 정보 및 누적된 위협, 파일, 프로세스 기록 데이터 베이스를 Claude에 함께 공급하여 사실에 입각한 대화 답변을 실시간 유도합니다.
-
----
-
-## 4. 핵심 알고리즘 메커니즘 명세
-
-### 4.1. 랜섬웨어 행위 기반 탐지 스코어링 수식
-행위 스코어러(`BehaviorScorer`)는 10초 윈도우 버퍼 내의 이벤트들을 분류하여 3가지 지표의 합산(0 ~ 100점)으로 계산합니다.
-
-$$Score = MassChangeScore(40) + EntropyScore(35) + ChurnScore(25)$$
-
-1. **Mass Change Score (최대 40점)**:
-   - 고유 경로 변경 개수($N_{path}$) 대비 탐지 설정의 대량 변경 기준값($MassThreshold$, 기본값 30개)의 비율로 가중 계산합니다.
-   $$MassChangeScore = \min\left(1.0, \frac{N_{path}}{MassThreshold}\right) \times 40$$
-2. **Entropy Score (최대 35점)**:
-   - 전체 변경된 파일 중 Shannon 엔트로피 실측값이 임계 점수($EntropyThreshold$, 기본값 7.2)를 상회하는 고엔트로피 파일 개수($N_{high\_entropy}$)의 비율로 계산합니다.
-   $$EntropyScore = \min\left(1.0, \frac{N_{high\_entropy}}{N_{path}}\right) \times 35$$
-3. **Churn Score (최대 25점)**:
-   - 전체 파일 시스템 행동 이벤트 건수($N_{event}$) 대비 이름 변경($Rename$) 및 삭제($Delete$) 행위의 합산 발생 빈도로 판독합니다.
-   $$ChurnScore = \min\left(1.0, \frac{N_{rename} + N_{delete}}{N_{event}}\right) \times 25$$
-
-#### 심각도 분류
-- 점수 $\ge 85$: `Critical`
-- 점수 $\ge 65$: `High`
-- 점수 $\ge 40$: `Medium`
-- 점수 $< 40$: `Low`
-
----
-
-### 4.2. 내용 주소 지정 백업(CAS) 및 원자적 복구 동작 원리
-랜섬웨어 감염이나 파일 변조 사고 발생 시 무결성이 검증된 상태로 안전하게 파일을 원상 복구하기 위해 CAS 및 원자적 대치 기법을 이용합니다.
-
-```
-[백업 절차]
-원본 파일 변경 이벤트 감지
-  │
-  ▼
-원본 파일의 SHA-256 해시 계산
-  │
-  ├─► 직전 백업 버전 해시와 동일? ──► [종료 (중복 백업 생략)]
-  │
-  ▼
-objects/ 디렉터리 내에 해당 해시 파일 존재 여부 확인
-  │
-  ├─► 이미 존재? ──────────────────► [SQLite 메타 인덱스 테이블에 버전 기록만 추가]
-  │
-  ▼
-임시 파일(.tmp) 생성 후 데이터 쓰기
-  │
-  ▼
-원하는 해시 명칭 기반 경로(objects/xx/xxxxxxxx...)로 원자적 이름 변경(rename) 실행
-  │
-  ▼
-SQLite 인덱스 DB(versions)에 (경로, 해시, 파일 크기, 타임스탬프, PID) 레코드 추가
-```
-
-```
-[복구 절차]
-사용자가 복구 요청 (argos restore <경로> --before-ms <시점>)
-  │
-  ▼
-인덱스 DB에서 해당 경로의 시점 기준 최적의 해시(hash) 및 메타데이터 조회
-  │
-  ▼
-objects/ 경로에서 해시 파일 탐색
-  │
-  ▼
-해당 파일 전체 데이터를 읽고 SHA-256 해시를 직접 재계산하여 무결성 검증
-  │
-  ├─► 해시 불일치? ─────────────► [무결성 에러 발생 및 복구 즉시 차단]
-  │
-  ▼
-복구 타겟 경로와 동일 위치에 임시 원복 파일(<경로>.argos-restore-tmp) 작성
-  │
-  ▼
-이름 변경(rename) 시스템 콜 호출하여 원복 완료 (대상 쓰기 차단 경합 해소 및 원자성 확보)
-```
-
----
-
-### 4.3. Ed25519 서명 정책 적용 제어 로직
-서명 정책을 설정한 에이전트의 시작 시 활성화 흐름입니다. 실행 중 유효기간을 벗어나면 수집·탐지는 유지하되 자동 차단을 중단하고 보호 저하를 표시합니다.
-
-```
-[관리 머신]                                     [서버 에이전트 노드]
-정책 작성 (policy.toml)                        argos.toml 구동 설정 로드
-  │                                              │
-  ▼                                              ▼
-서명키로 서명 서명생성                            policy.toml.sig 정책 서명 파일 탐색
-  │                                              │
-  ▼                                              ▼
-policy.toml.sig 생성                             로컬 trusted_keys와 서버·그룹 정보 로드
-  │                                              │
-  ▼                                              ▼
-정책 배포 ──────────────────────────────────────► 같은 원문 바이트로 서명·정책 조건 검증
-                                                 │
-                                                 ├─► 검증/저장 실패? ──► [시작 중단, 기본 정책으로 전환하지 않음]
-                                                 │
-                                                 ▼
-                                               수락 정책·버전·감사 기록 원자적 저장 후 실행
-```
-
----
-
-## 5. 알려진 한계 및 장래 개선 로드맵
-
-현재 Argos AI Security MVP 버전은 핵심 위협 탐지 및 복구 프로세스가 안정적으로 구축되어 작동하고 있으나, 다음과 같은 한계를 인지하고 있으며 향후 고도화 단계에서 개선될 예정입니다.
-
-1. **inotify (notify Crate) 기반 수집 한계**
-   - notify 백엔드 구동 시 파일 이벤트를 발생시킨 원인 프로세스의 PID를 획득할 수 없어 호스트 단위 탐지만 제공 가능하며 정밀한 단일 프로세스 타겟 차단이 곤란합니다.
-   - *해결 방안*: Linux 전용 `fanotify` 센서를 기본 적용하거나, eBPF 커널 프로브 센서를 통해 저수준 계층에서 직접 고해상도로 PID를 매핑합니다.
-2. **단명(Short-lived) 프로세스 감시 누락 리스크**
-   - 현재 구현된 프로세스 감시 모듈은 `/proc` 디렉터리의 1초 단위 폴링 방식을 사용하고 있어, 기동 후 수십 밀리초 이내에 자식 파일을 변조하고 스스로 자멸하는 고도로 설계된 단명 프로세스는 포착하지 못할 리스크가 존재합니다.
-   - *해결 방안*: Phase 3에서 커널의 `sched_process_exec` 및 `sched_process_exit` Tracepoint 이벤트를 링 버퍼 방식으로 다이렉트 스트리밍하는 eBPF 센서 유닛을 신설합니다.
-3. **대규모 데이터 처리량 한계**
-   - SQLite 로컬 저장소는 파일 I/O 동시성에 일정 한계가 존재하므로, 초당 20,000건 이상의 엔터프라이즈급 원시 이벤트가 폭주하는 시스템 환경에서는 데이터 경합이 심화될 우려가 있습니다.
-   - *해결 방안*: 대용량 분산 컬럼 기반 DB인 ClickHouse를 중앙 서버 연동 데이터베이스 백엔드로 병합하고 에이전트 내부에 배치성 메모리 버퍼 및 필터링 윈도우를 도입합니다.
+릴리즈 시험은 [검증 기록](PLATFORM_VALIDATION.md)에 결과와 한계를 남긴다. 시험 통과를 초당 처리량·탐지 지연·운영 오탐률·전체 fanotify 통합 경로의 검증으로 확대 해석하지 않는다.

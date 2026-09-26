@@ -1,299 +1,220 @@
-/**
- * Argos AI Security - Interactive Landing Page Logic (i18n, CLI Simulator, FAQ Accordion)
- */
-
-// Multilingual Dictionary (KO / EN)
+/** v0.2.0 landing page copy and illustrative CLI workflows. No backend calls. */
 const i18n = {
-  ko: {
-    nav_features: "핵심 기능",
-    nav_cli: "CLI 데모",
-    nav_architecture: "아키텍처",
-    nav_recovery: "복구 메커니즘",
-    nav_faq: "자주 묻는 질문",
-    hero_badge: "AI 기반 Linux 서버 랜섬웨어 방어 플랫폼",
-    hero_title: "Linux 서버 보안의 새로운 기준,<br><span class='text-gradient'>Argos AI Security</span>",
-    hero_subtitle: "실시간 파일·프로세스 감시, Shannon 엔트로피 분석, 0초 차단, 해시 검증 복구 및 Claude AI Threat Copilot을 통한 완벽한 랜섬웨어 방어 체계",
-    btn_quickstart: "빠른 시작 가이드",
-    btn_demo: "CLI 데모 체험",
-    metric_time: "0ms",
-    metric_time_label: "탐지-차단 지연 시간",
-    metric_recovery: "100%",
-    metric_recovery_label: "해시 검증 복구율",
-    metric_policy: "Ed25519",
-    metric_policy_label: "위변조 방지 정책 서명",
-    metric_ai: "24/7",
-    metric_ai_label: "Claude AI 사고 분석",
-    
-    sec_features_title: "엔터프라이즈급 6대 핵심 보안 기능",
-    sec_features_desc: "단순 로그 감시를 넘어 프로세스 차단, 복구, AI 분석까지 일체형으로 제공합니다.",
-    feat1_title: "실시간 행위 탐지 (Behavior Scoring)",
-    feat1_desc: "fanotify 및 notify 기반 파일/프로세스 감시. 슬라이딩 윈도우(10초) 내 변경·삭제·확장자 변경 행위를 0~100점 스케일로 실시간 평가합니다.",
-    feat2_title: "Shannon 엔트로피 암호화 탐지",
-    feat2_desc: "파일 수정 발생 시 상위 64KB의 엔트로피를 계산(암호화 데이터 ≈ 7.2+). 랜섬웨어가 파일 전체를 암호화하기 직전에 즉각 감지합니다.",
-    feat3_title: "해시 검증 무결성 복구 (CAS)",
-    feat3_desc: "SHA-256 내용 주소 백업 저장소(Content-Addressable Storage)를 운용하여, 변조 전 시점으로 100% 해시 검증 복구를 수행합니다.",
-    feat4_title: "Ed25519 Cryptographic Policy",
-    feat4_desc: "서명되지 않은 보안 정책은 즉시 거부됩니다. 공격자에 의한 보안 정책 우회 및 임의 변경을 원천 차단합니다.",
-    feat5_title: "Claude AI Threat Copilot",
-    feat5_desc: "argos-brain 크레이트를 통해 실제 SQLite Audit Log에만 기반한 AI 위협 분석 요건 보고서를 즉시 작성합니다 (Hallucination 방지).",
-    feat6_title: "프로세스 차단 & 네트워크 격리",
-    feat6_desc: "SIGKILL/SIGSTOP으로 위험 프로세스 즉각 사살 및 iptables 기반 ARGOS_ISOLATE 체인을 생성하여 2차 감염 확산을 방지합니다.",
-
-    sec_cli_title: "강력한 CLI (Command Line Interface)",
-    sec_cli_desc: "터미널에서 명령어 한 줄로 실시간 보안 상태 확인부터 AI 사고 분석, 파일 복구까지 제어합니다.",
-
-    sec_arch_title: "단탄한 시스템 아키텍처",
-    sec_arch_desc: "독립된 Rust 크레이트 모듈화 설계로 극대화된 성능과 안전성을 제공합니다.",
-    arch_sensor: "argos-sensor",
-    arch_sensor_desc: "notify / fanotify / procmon 파일 & 프로세스 이벤트 수집",
-    arch_detect: "argos-detect",
-    arch_detect_desc: "Shannon 엔트로피 + 행위 점수 산정 로직",
-    arch_recovery: "argos-recovery",
-    arch_recovery_desc: "SHA-256 CAS 버전 관리 백업 및 무결성 복구",
-    arch_response: "argos-response",
-    arch_response_desc: "SIGKILL 프로세스 차단 & iptables 네트워크 격리",
-    arch_brain: "argos-brain",
-    arch_brain_desc: "Claude API 기반 AI 사고 설명 및 자연어 질의응답",
-    arch_policy: "argos-policy",
-    arch_policy_desc: "Ed25519 비대칭키 정책 서명 및 무결성 검증",
-
-    sec_faq_title: "자주 묻는 질문 (FAQ)",
-    sec_faq_desc: "Argos AI Security 도입 및 운용에 대한 주요 답변입니다.",
-    faq1_q: "Q1. 기존 EDR/백신 제품과 Argos AI Security의 핵심 차별점은 무엇인가요?",
-    faq1_a: "Argos는 단순히 알려진 시그니처 패턴만 비교하는 것이 아니라, 실시간 행위 점수(Behavior Scoring)와 Shannon 엔트로피 분석을 결합하여 Zero-day 랜섬웨어도 즉각 감지합니다. 또한 공격으로 훼손된 파일은 SHA-256 기반 내용 주소 백업(CAS)을 통해 공격 이전 시점으로 100% 해시 검증 복구가 가능합니다.",
-    faq2_q: "Q2. 오탐(False Positive)으로 인해 중요한 서비스 프로세스가 차단될 위험은 없나요?",
-    faq2_a: "Argos는 안정성을 최우선으로 설계되었습니다. 기본 정책은 auto_block=false(Dry-run 모드)이며, 오탐 방지를 위해 위험 점수가 80점 이상이고 확실한 원인 pid가 식별된 경우에만 차단 조치를 수행합니다. 또한 시스템 핵심 프로세스(pid 0 등)에 대한 시그널 전송은 원천적으로 거부됩니다.",
-    faq3_q: "Q3. AI 분석 기능 사용 시 기업 내 민감한 파일 내용이 외부로 유출되나요?",
-    faq3_a: "전혀 유출되지 않습니다. argos-brain 크레이트는 실제 파일 내용이 아닌, SQLite 감사 로그에 기록된 파일 이벤트 유형, 변경 비율, 엔트로피 점수 등 메타데이터만을 요약하여 Claude API로 전달합니다 (Hallucination 방지 및 보안 준수).",
-    faq4_q: "Q4. Linux 외에 Windows나 macOS 환경에서도 빌드 및 개발 테스트가 가능한가요?",
-    faq4_a: "네, 전체 워크스페이스는 Windows/macOS 환경에서도 컴파일 및 테스트가 지원됩니다. 크로스 플랫폼 파일 센서(notify)가 제공되며, Linux 전용 기능(fanotify, process kill, iptables)은 #[cfg(target_os = \"linux\")]로 안전하게 격리되어 있습니다.",
-
-    footer_tagline: "AI 기반 Linux 서버 실시간 탐지·차단·복구 보안 플랫폼",
-    footer_quick_inquiry: "문의 요청:",
-    footer_rights: "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0."
+  "ko": {
+    "nav_features": "핵심 기능",
+    "nav_cli": "CLI 데모",
+    "nav_architecture": "아키텍처",
+    "nav_recovery": "복구 메커니즘",
+    "nav_faq": "자주 묻는 질문",
+    "hero_badge": "v0.2.0 · Linux 보안 플랫폼",
+    "hero_title": "차단과 복구를 검증하는 Linux 보안<br><span class=\"text-gradient\">Argos AI Security</span>",
+    "hero_subtitle": "파일·프로세스 행위 분석, 서명 정책 검증, 정상 복구 지점과 사건 증거 보존. Anthropic·Ollama를 통한 근거 기반 AI 조사를 지원합니다.",
+    "btn_quickstart": "빠른 시작 가이드",
+    "btn_demo": "CLI 데모 체험",
+    "metric_time": "v0.2.0",
+    "metric_time_label": "공개 릴리즈",
+    "metric_recovery": "SHA-256",
+    "metric_recovery_label": "복구 객체 무결성 검증",
+    "metric_policy": "Ed25519",
+    "metric_policy_label": "서명·버전·기간 검증",
+    "metric_ai": "Ollama",
+    "metric_ai_label": "Anthropic·온프레미스 AI",
+    "sec_features_title": "탐지부터 조사·복구까지",
+    "sec_features_desc": "자동 차단은 기본 비활성입니다. 정책을 과거 이벤트로 비교하고 정상본을 검토한 뒤 운영 범위를 넓힐 수 있습니다.",
+    "feat1_title": "행위·Linux 설정 분석",
+    "feat1_desc": "notify/fanotify 파일 감시와 /proc 프로세스 관측을 결합합니다. 선택한 10/60/600초 집계와 SSH·sudoers·cron·systemd 설정 차이를 분석합니다.",
+    "feat2_title": "내용 표본과 엔트로피",
+    "feat2_desc": "기본 앞부분 64 KiB를 분석하며, 선택 기능으로 읽기 예산을 앞·중간·끝에 나눕니다. 이전 관측과 파일 유형을 비교하지만 파일 전체 검사나 공격 판정을 보증하지는 않습니다.",
+    "feat3_title": "정상본 복구·사건 보존",
+    "feat3_desc": "검토해 지정한 정상본만 원본에 복구합니다. 별도 경로 미리보기·복구 시험을 제공하고, 사건별 보존 참조를 정상 판정과 별도로 관리합니다.",
+    "feat4_title": "서명 정책·사전 검증",
+    "feat4_desc": "운영 활성화 시 Ed25519 서명·버전·유효기간·대상·키 ID를 검사합니다. 과거 이벤트 재생은 후보 정책의 알림·예상 차단 차이와 조회 누락을 보여줍니다.",
+    "feat5_title": "근거 기반 AI·증거 패키지",
+    "feat5_desc": "Anthropic 또는 Ollama로 기간별 근거 ID와 조회 누락을 포함해 조사합니다. 읽기 전용 MCP와 SHA-256 manifest를 포함한 사고 증거 내보내기를 지원합니다.",
+    "feat6_title": "프로세스 차단·네트워크 격리",
+    "feat6_desc": "자동 차단을 켠 Linux 호스트에서 PID·시작 시각·부팅 ID를 확인하고 종료 결과를 기록합니다. 별도 격리 명령은 IPv4/IPv6의 명시적 관리 연결만 허용합니다.",
+    "sec_cli_title": "CLI 사용 흐름 살펴보기",
+    "sec_cli_desc": "설명을 위한 가상 데이터와 요약 예시입니다. 실제 서버에 연결하거나 명령을 실행하지 않으며, 처리 시간·탐지율·복구율의 측정 결과가 아닙니다.",
+    "sec_arch_title": "수집·판단·보존을 나눈 구조",
+    "sec_arch_desc": "대응 판단과 알림 억제를 분리하고 백업·사건 보존·중앙 전송을 별도 작업으로 처리합니다. 실제 운영 처리량은 배포 환경에서 검증해야 합니다.",
+    "arch_sensor": "argos-sensor",
+    "arch_sensor_desc": "notify / fanotify 파일 이벤트와 /proc 신원·UID/GID·capability 관측",
+    "arch_detect": "argos-detect",
+    "arch_detect_desc": "센서별 점수·내용 표본·선택적 다중 시간창과 계보 집계",
+    "arch_recovery": "argos-recovery",
+    "arch_recovery_desc": "정상본 판정·미리보기·복구 시험·독립 사건 보존 참조",
+    "arch_response": "argos-response",
+    "arch_response_desc": "pidfd 신원 확인·종료 결과 감사와 IPv4/IPv6 격리",
+    "arch_brain": "argos-brain",
+    "arch_brain_desc": "Anthropic / Ollama 기반 기간별 근거 조회와 AI 설명",
+    "arch_policy": "argos-policy",
+    "arch_policy_desc": "서명·버전·기간·대상 검증, 승인 근거를 포함한 새 버전 롤백",
+    "sec_faq_title": "자주 묻는 질문 (FAQ)",
+    "sec_faq_desc": "Argos AI Security 도입 및 운용에 대한 주요 답변입니다.",
+    "faq1_q": "Q1. 무엇을 검증할 수 있나요?",
+    "faq1_a": "센서별 탐지 점수와 대응 결과, 검토한 정상본의 해시와 복구 시험 결과를 구분해서 확인합니다. v0.2.0은 144개 단위·회귀 테스트와 8개 보안 시나리오를 통과했습니다. 이는 운영 탐지율·처리량이나 모든 파일의 복구 가능성을 보증하는 수치가 아닙니다.",
+    "faq2_q": "Q2. 기본 설정에서 프로세스가 자동 차단되나요?",
+    "faq2_a": "아니요. auto_block=false가 기본이며 notify 센서는 원인 PID를 제공하지 않습니다. 자동 차단은 명시적 활성화, 기본 80점 임계치와 규칙 조건, Linux 프로세스 신원 검증이 필요합니다. 오탐 위험이 있으므로 정책 재생과 관찰 모드로 먼저 확인하세요.",
+    "faq3_q": "Q3. AI에 어떤 데이터가 전달되나요?",
+    "faq3_a": "설정한 제공자에 저장된 이벤트·탐지·프로세스·대응 근거를 전달합니다. 파일 본문을 직접 보내지는 않지만 경로·명령행·계정 정보에도 민감한 값이 있을 수 있습니다. Anthropic은 외부 API이며, Ollama는 지정한 사내 주소로 구성할 수 있습니다. 모델 ID와 조회 범위를 확인하세요.",
+    "faq4_q": "Q4. 어떤 환경에서 사용할 수 있나요?",
+    "faq4_a": "v0.2.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다.",
+    "footer_tagline": "차단·정상본 복구·사건 근거를 검증하는 Linux 보안 플랫폼",
+    "footer_quick_inquiry": "문의 요청:",
+    "footer_rights": "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0.",
+    "nav_docs": "문서",
+    "btn_download": "v0.2.0 다운로드"
   },
-  en: {
-    nav_features: "Features",
-    nav_cli: "CLI Demo",
-    nav_architecture: "Architecture",
-    nav_recovery: "Recovery",
-    nav_faq: "FAQ",
-    hero_badge: "AI-Powered Linux Server Ransomware Defense Platform",
-    hero_title: "The New Standard in Linux Security,<br><span class='text-gradient'>Argos AI Security</span>",
-    hero_subtitle: "Complete ransomware defense featuring real-time file & process monitoring, Shannon entropy analysis, 0-second blocking, hash-verified recovery, and Claude AI Threat Copilot.",
-    btn_quickstart: "Quick Start Guide",
-    btn_demo: "Interactive CLI Demo",
-    metric_time: "0ms",
-    metric_time_label: "Detection-to-Block Latency",
-    metric_recovery: "100%",
-    metric_recovery_label: "Hash-Verified Recovery",
-    metric_policy: "Ed25519",
-    metric_policy_label: "Tamper-Proof Policy Signature",
-    metric_ai: "24/7",
-    metric_ai_label: "Claude AI Incident Analysis",
-    
-    sec_features_title: "Enterprise Security Pillars",
-    sec_features_desc: "Going beyond traditional log auditing to deliver integrated process termination, recovery, and AI copilot response.",
-    feat1_title: "Real-time Behavior Scoring",
-    feat1_desc: "fanotify & notify based file/process auditing. Evaluates modification, deletion, and extension change rates on a 0-100 severity scale within a 10s sliding window.",
-    feat2_title: "Shannon Entropy Detection",
-    feat2_desc: "Calculates Shannon entropy on file headers (64KB) upon modification (encrypted data ≈ 7.2+), catching ransomware right before whole-file encryption.",
-    feat3_title: "Hash-Verified Integrity Recovery",
-    feat3_desc: "Operates a SHA-256 Content-Addressable Storage (CAS) backup engine to perform 100% hash-verified instant file restoration to pre-attack states.",
-    feat4_title: "Ed25519 Cryptographic Policy",
-    feat4_desc: "Unsigned security policies are strictly rejected, preventing attackers from bypassing or modifying security configurations.",
-    feat5_title: "Claude AI Threat Copilot",
-    feat5_desc: "Generates factual threat summaries grounded exclusively in SQLite WAL audit logs via the argos-brain crate (Hallucination-free).",
-    feat6_title: "Process Kill & Network Isolation",
-    feat6_desc: "Terminates malicious processes via SIGKILL/SIGSTOP and enforces iptables ARGOS_ISOLATE chains to stop lateral movement.",
-
-    sec_cli_title: "Powerful Command Line Interface",
-    sec_cli_desc: "Control everything from security auditing to AI incident explanations and file recovery right from your terminal.",
-
-    sec_arch_title: "Robust Modular Architecture",
-    sec_arch_desc: "Designed as decoupled Rust crates for maximum performance, memory safety, and high throughput.",
-    arch_sensor: "argos-sensor",
-    arch_sensor_desc: "notify / fanotify / procmon file & process telemetry collector",
-    arch_detect: "argos-detect",
-    arch_detect_desc: "Shannon entropy & sliding window behavior scoring engine",
-    arch_recovery: "argos-recovery",
-    arch_recovery_desc: "SHA-256 CAS versioned backup & hash verification recovery",
-    arch_response: "argos-response",
-    arch_response_desc: "SIGKILL process enforcement & iptables network isolation",
-    arch_brain: "argos-brain",
-    arch_brain_desc: "Claude API powered AI threat summary & natural language query",
-    arch_policy: "argos-policy",
-    arch_policy_desc: "Ed25519 asymmetric key policy signing & verification",
-
-    sec_faq_title: "Frequently Asked Questions",
-    sec_faq_desc: "Key insights into deploying and operating Argos AI Security.",
-    faq1_q: "Q1. How does Argos AI Security differ from traditional EDR or antivirus software?",
-    faq1_a: "Argos does not rely solely on static signatures. It combines real-time behavior scoring with Shannon entropy calculation to detect zero-day ransomware. Furthermore, files damaged by an attack can be restored with 100% hash verification via SHA-256 Content-Addressable Storage.",
-    faq2_q: "Q2. Is there a risk of critical business processes being blocked by false positives?",
-    faq2_a: "Argos prioritizes operational stability. By default, auto_block=false (dry-run mode). Automated process blocking requires a behavior score ≥ 80 and a verified target PID. Critical system PIDs (such as PID 0) are strictly protected from signal enforcement.",
-    faq3_q: "Q3. Does the AI threat analysis export sensitive file contents offsite?",
-    faq3_a: "No. The argos-brain crate extracts only audit event metadata—such as event types, modification counts, and entropy scores from the SQLite database—and sends strictly non-sensitive telemetry to the Claude API.",
-    faq4_q: "Q4. Can Argos be compiled and tested on Windows or macOS?",
-    faq4_a: "Yes. The entire workspace compiles and runs on Windows and macOS using the cross-platform notify sensor. Linux-specific modules (fanotify, process signals, iptables) are safely gated under #[cfg(target_os = \"linux\")].",
-
-    footer_tagline: "AI-Powered Real-Time Linux Server Ransomware Defense Platform",
-    footer_quick_inquiry: "Inquiry:",
-    footer_rights: "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0."
+  "en": {
+    "nav_features": "Features",
+    "nav_cli": "CLI Demo",
+    "nav_architecture": "Architecture",
+    "nav_recovery": "Recovery",
+    "nav_faq": "FAQ",
+    "hero_badge": "v0.2.0 · Linux security platform",
+    "hero_title": "Linux security with verifiable response and recovery<br><span class=\"text-gradient\">Argos AI Security</span>",
+    "hero_subtitle": "File and process behavior analysis, signed policy validation, reviewed recovery points, and incident retention. Investigate recorded evidence with Anthropic or Ollama.",
+    "btn_quickstart": "Quick Start Guide",
+    "btn_demo": "Interactive CLI Demo",
+    "metric_time": "v0.2.0",
+    "metric_time_label": "Published release",
+    "metric_recovery": "SHA-256",
+    "metric_recovery_label": "Recovery object integrity",
+    "metric_policy": "Ed25519",
+    "metric_policy_label": "Signature, version and time checks",
+    "metric_ai": "Ollama",
+    "metric_ai_label": "Anthropic or on-premises AI",
+    "sec_features_title": "Detection, investigation and recovery",
+    "sec_features_desc": "Automatic blocking is off by default. Compare policies against recorded events and review recovery points before expanding deployment.",
+    "feat1_title": "Behavior and Linux configuration analysis",
+    "feat1_desc": "Combine notify/fanotify file events with /proc observations. Optional 10/60/600-second aggregation and explicitly monitored SSH, sudoers, cron and systemd files expose related changes.",
+    "feat2_title": "Content samples and entropy",
+    "feat2_desc": "The default reads up to 64 KiB from the beginning. Optional sampling divides a read budget across the beginning, middle and end and compares prior observations and file types. It does not inspect every byte.",
+    "feat3_title": "Reviewed recovery and incident retention",
+    "feat3_desc": "Restore originals only from versions explicitly marked known-good. Preview elsewhere, test recovery, and retain incident references independently of the trust decision.",
+    "feat4_title": "Signed policies and preflight comparison",
+    "feat4_desc": "Activation checks Ed25519 signatures, versions, time bounds, targets and key IDs. Historical replay reports alert differences, potential blocking targets and missing evidence for a candidate policy.",
+    "feat5_title": "Evidence-based AI and export",
+    "feat5_desc": "Investigate a time range with Anthropic or Ollama, evidence IDs and truncation counts. Use read-only MCP or export an incident package with a SHA-256 manifest.",
+    "feat6_title": "Process response and network isolation",
+    "feat6_desc": "With blocking enabled on Linux, verify PID, start time and boot ID before termination and record the result. Separate IPv4/IPv6 isolation commands allow only explicit management connections.",
+    "sec_cli_title": "Explore the CLI workflow",
+    "sec_cli_desc": "Illustrative data and abbreviated explanations only. This page does not connect to a server or run commands. Outputs are not latency, detection-rate or recovery-rate measurements; English text translates the Korean CLI.",
+    "sec_arch_title": "Separate collection, decisions and retention",
+    "sec_arch_desc": "Response decisions are independent of alert suppression. Backup, incident retention and central delivery use separate workers. Production throughput needs validation in your deployment.",
+    "arch_sensor": "argos-sensor",
+    "arch_sensor_desc": "notify / fanotify file events and /proc identity, UID/GID and capability observations",
+    "arch_detect": "argos-detect",
+    "arch_detect_desc": "Sensor-aware scoring, content samples and optional time-window and ancestry aggregation",
+    "arch_recovery": "argos-recovery",
+    "arch_recovery_desc": "Known-good review, previews, recovery tests and independent incident retention",
+    "arch_response": "argos-response",
+    "arch_response_desc": "pidfd identity checks, termination audit and IPv4/IPv6 isolation",
+    "arch_brain": "argos-brain",
+    "arch_brain_desc": "Time-bounded evidence and AI explanations with Anthropic or Ollama",
+    "arch_policy": "argos-policy",
+    "arch_policy_desc": "Signature, version, validity and target checks; rollback as an approved new version",
+    "sec_faq_title": "Frequently Asked Questions",
+    "sec_faq_desc": "Key insights into deploying and operating Argos AI Security.",
+    "faq1_q": "Q1. What can I verify?",
+    "faq1_a": "Inspect detection scores, actual response results and the integrity and recovery tests of reviewed backups separately. v0.2.0 passed 144 unit/regression tests and eight security scenarios. Those are not guarantees of production detection rates, throughput or recovery coverage.",
+    "faq2_q": "Q2. Does the default configuration block processes?",
+    "faq2_a": "No. auto_block=false is the default, and notify cannot attribute file events to a PID. Blocking requires explicit activation, the default score threshold of 80 plus rule conditions, and verified Linux process identity. Use policy replay and observation mode to assess false positives first.",
+    "faq3_q": "Q3. Which data is sent to the AI provider?",
+    "faq3_a": "Stored file, detection, process and response evidence goes to the configured provider. File bodies are not sent directly, but paths, command lines and account information can still contain sensitive values. Anthropic uses an external API; Ollama can use your on-premises endpoint. Configure the model ID and review the query scope.",
+    "faq4_q": "Q4. Which environments are supported?",
+    "faq4_a": "The v0.2.0 binaries target GNU/Linux x86_64 with glibc 2.39 or later. Source builds require Rust 1.86 or later. notify also provides a development path for other operating systems, but this release supplies no Windows/macOS binaries or execution validation. fanotify, process response and isolation need Linux support and permissions.",
+    "footer_tagline": "A Linux platform for verifiable response, reviewed recovery and incident evidence",
+    "footer_quick_inquiry": "Inquiry:",
+    "footer_rights": "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0.",
+    "nav_docs": "Docs",
+    "btn_download": "Download v0.2.0"
   }
 };
 
-// CLI Command Output Simulator Database
-const cliSimulations = {
-  status: {
-    cmd: "argos status",
-    out: `[Argos Agent System Status]
-Daemon State: RUNNING (PID 4192)
-Storage: SQLite WAL (/var/lib/argos/argos.db - 4.2 MB)
-Active Sensor: fanotify (Linux Root Telemetry)
-Monitored Path: /srv/app/data, /etc/nginx, /var/www
-Policy Verification: PASSED (Ed25519 Signed by SecOps Key #1)
-Auto-Block: ENABLED (Score Threshold >= 80)
-Active Threats: 0 Critical | 1 Resolved`
+const cliCommands = {
+  "status": "argos --config argos.toml status",
+  "policy": "argos --config argos.toml policy verify",
+  "restore": "argos restore /srv/data/report.txt --list",
+  "explain": "argos ask --from-ms 1790380800000 --to-ms 1790467200000 \"Review this period\"",
+  "evidence": "argos evidence-export 42 --out /secure/incident-42"
+};
+const cliExamples = {
+  "ko": {
+    "status": "[예제 설정을 사용하는 상태 출력 발췌]\n센서        : Notify\n자동 차단   : 비활성 (탐지 전용)\n중앙 서버   : 미연동 (standalone)\n\n생존 신호와 보호 지표는 실제 에이전트 기록에서 확인합니다.\n탐지 없음과 감시 중단은 서로 다른 상태입니다.",
+    "policy": "[신뢰 키·메타데이터를 설정한 정책의 검증 예시]\n서명·유효기간·대상·설정 검증 성공.\n영구 버전 검사/적용은 에이전트 시작 시 실행됩니다.\n\n$ argos --config argos.toml policy status\n마지막 수락 정책의 버전·해시와 감사 이력을 조회합니다.\nverify 명령은 정책을 활성화하지 않습니다.",
+    "restore": "[가상 버전 목록 발췌]\nID   TRUST\n23   unverified\n19   known-good  (운영자 검토 근거가 있는 버전)\n\n$ argos restore /srv/data/report.txt --version 23 --preview /tmp/report-preview.txt\n미검토 버전은 새 경로에서 먼저 검토합니다.\n\n$ argos restore /srv/data/report.txt\n기본 복구는 최신 정상 판정 버전을 선택합니다.\n백업 시각이나 해시 일치만으로 정상본이 되지 않습니다.",
+    "explain": "[기간을 명시한 AI 조사 흐름]\n설정한 Anthropic/Ollama 제공자와 명시한 모델 ID를 사용합니다.\n호스트 범위는 현재 설정의 로컬 이벤트 DB입니다.\n종류별 전체/조회 건수와 누락을 표시하고 근거 ID를 전달합니다.\n\n답변은 원본 근거와 대조해야 합니다.\n이 데모는 AI를 호출하지 않으며 실제 조사 결과를 표시하지 않습니다.",
+    "evidence": "[새 디렉터리에 작성하는 증거 패키지]\nevidence.json  근거·대응 결과·조회 범위와 누락\npolicy.json    내보내기 시점의 마지막 수락 정책 또는 로컬 설정\nmanifest.json  파일 목록·크기·SHA-256·마스킹 범위\n\n$ argos evidence-verify /secure/incident-42\n파일과 manifest의 일치 여부를 검증합니다.\n기본값은 민감 필드를 가리며, 해시 검증은 발급자 진위 증명이 아닙니다."
   },
-  threats: {
-    cmd: "argos threats",
-    out: `[Recent Threat Audit Logs - Last 24 Hours]
-ID: 104 | Score: <span class="cli-highlight-critical">92/100 (CRITICAL)</span> | Timestamp: 2026-08-01 09:05:12 UTC
-Process: pid=8412 (/tmp/.malware_exec)
-Event Summary: 142 file edits in 3.2s, High Entropy Write (7.84/8.0)
-Action Taken: <span class="cli-highlight-success">SIGKILL ENFORCED</span> -> PID 8412 Terminated | Backup Snapshots Created: 142 files`
-  },
-  restore: {
-    cmd: "argos restore /srv/app/data/customer_db.sqlite --list",
-    out: `[SHA-256 CAS Backup History for customer_db.sqlite]
-Version 3: 2026-08-01 09:05:11 UTC (Hash: a7f8c2... | Size: 1.2 MB) <span class="cli-highlight-success">[PRE-ATTACK SAFE POINT]</span>
-Version 2: 2026-08-01 08:00:00 UTC (Hash: b3d9e1... | Size: 1.1 MB)
-Version 1: 2026-08-01 00:00:00 UTC (Hash: e81c4a... | Size: 1.0 MB)
-
-<span class="cli-cmd">$ argos restore /srv/app/data/customer_db.sqlite</span>
-[Argos Recovery Engine]
-Verifying target hash: a7f8c2e91b...
-Restoring file to /srv/app/data/customer_db.sqlite...
-<span class="cli-highlight-success">[SUCCESS] File restored cleanly. Hash verification 100% matched!</span>`
-  },
-  explain: {
-    cmd: "argos explain 104",
-    out: `[Argos AI Copilot - Powered by Claude Messages API]
-Analyzing Threat Record #104 from SQLite Audit Logs...
-
-<span class="cli-highlight-info">[AI Incident Narrative Summary]</span>
-At 09:05:12 UTC, binary '/tmp/.malware_exec' (PID 8412) attempted rapid bulk encryption across '/srv/app/data'. 
-- Shannon entropy spiked from 4.1 to 7.84 across 142 files.
-- Argos Scorer calculated severity score 92 (Critical).
-- Automated response triggered SIGKILL within 45ms, isolating PID 8412.
-- Recommended Action: Run 'argos restore /srv/app/data/ --before-ms 1760000000000' to restore all 142 files to safe versions.`
-  },
-  policy: {
-    cmd: "argos policy verify",
-    out: `[Ed25519 Security Policy Verification]
-Policy File: /etc/argos/policy.toml
-Public Key:  ed25519_pk_8f7a9d2c41e0...
-Signature:   ed25519_sig_3b811a95c...
-
-Result: <span class="cli-highlight-success">[VALID] Policy signature matches public key. Policy active.</span>
-Active Rules:
- - auto_block = true
- - entropy_threshold = 7.0
- - sliding_window_sec = 10`
+  "en": {
+    "status": "[Translated excerpt using the example configuration]\nSensor        : Notify\nAuto-block    : Disabled (detection only)\nCentral       : Standalone\n\nCheck actual heartbeat and protection metrics from your agent.\nNo detections and interrupted monitoring are different states.",
+    "policy": "[Example with trusted keys and policy metadata configured]\nSignature, time bounds, target and settings verified.\nPersistent version checks and activation occur at agent startup.\n\n$ argos --config argos.toml policy status\nRead the last accepted version, hash and audit history.\nThe verify command does not activate a policy.",
+    "restore": "[Illustrative version list]\nID   TRUST\n23   unverified\n19   known-good  (explicitly reviewed by an operator)\n\n$ argos restore /srv/data/report.txt --version 23 --preview /tmp/report-preview.txt\nReview the unverified version in a new file first.\n\n$ argos restore /srv/data/report.txt\nDefault restore selects the latest known-good version.\nAn earlier timestamp or matching hash alone does not establish trust.",
+    "explain": "[AI investigation with an explicit time range]\nUses the configured Anthropic/Ollama provider and explicit model ID.\nThe host scope is the local event DB in your configuration.\nIncludes per-source counts, missing coverage and evidence IDs.\n\nCompare the answer with the underlying evidence.\nThis demo makes no AI calls and displays no real incident findings.",
+    "evidence": "[Evidence package in a new directory]\nevidence.json  Evidence, response records and query coverage\npolicy.json    Last accepted policy or local configuration at export\nmanifest.json  File list, sizes, SHA-256 and redaction scope\n\n$ argos evidence-verify /secure/incident-42\nChecks consistency between files and the manifest.\nSensitive fields are redacted by default; hashes do not authenticate origin."
   }
 };
 
-let currentLang = 'ko';
-
-// Function to update UI texts based on current language
-function setLanguage(lang) {
-  currentLang = lang;
-  document.documentElement.lang = lang;
-  
-  const elements = document.querySelectorAll('[data-i18n]');
-  elements.forEach(el => {
-    const key = el.getAttribute('data-i18n');
-    if (i18n[lang] && i18n[lang][key]) {
-      el.innerHTML = i18n[lang][key];
-    }
+// The URL owns the locale; loading the English page must never replace it with Korean.
+const currentLang = document.documentElement.lang === 'en' ? 'en' : 'ko';
+function switchCliTab(key) {
+  if (!Object.hasOwn(cliCommands, key)) return;
+  document.querySelectorAll('.cli-tab').forEach(tab => {
+    const active = tab.dataset.cli === key;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', String(active));
   });
-
-  const langBtnText = document.getElementById('lang-text');
-  if (langBtnText) {
-    langBtnText.textContent = lang === 'ko' ? 'EN' : 'KO';
-  }
-
-  localStorage.setItem('argos_lang', lang);
+  const body = document.getElementById('cli-output-container');
+  if (!body) return;
+  const command = document.createElement('div');
+  const prompt = document.createElement('span');
+  prompt.className = 'cli-prompt';
+  prompt.textContent = 'demo@argos:~$ ';
+  const text = document.createElement('span');
+  text.className = 'cli-cmd';
+  text.textContent = cliCommands[key];
+  command.append(prompt, text);
+  const output = document.createElement('div');
+  output.className = 'cli-output';
+  output.textContent = cliExamples[currentLang][key];
+  body.replaceChildren(command, output);
 }
 
-// Function to simulate CLI command switching
-function switchCliTab(tabKey) {
-  const tabs = document.querySelectorAll('.cli-tab');
-  tabs.forEach(t => t.classList.remove('active'));
-
-  const activeTab = document.querySelector(`.cli-tab[data-cli="${tabKey}"]`);
-  if (activeTab) activeTab.classList.add('active');
-
-  const cliBody = document.getElementById('cli-output-container');
-  if (cliBody && cliSimulations[tabKey]) {
-    const data = cliSimulations[tabKey];
-    cliBody.innerHTML = `
-      <div><span class="cli-prompt">gaga@argos-linux:~$</span> <span class="cli-cmd">${data.cmd}</span></div>
-      <div class="cli-output">${data.out}</div>
-    `;
-  }
-}
-
-// FAQ Accordion Setup
-function initFaqAccordion() {
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-i18n]').forEach(element => {
+    const value = i18n[currentLang][element.dataset.i18n];
+    if (value) element.innerHTML = value; // Trusted static copy only; demo data uses textContent.
+  });
+  document.querySelectorAll('.cli-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchCliTab(tab.dataset.cli));
+  });
+  switchCliTab('status');
   const faqItems = document.querySelectorAll('.faq-item');
   faqItems.forEach(item => {
-    const btn = item.querySelector('.faq-question');
-    if (btn) {
-      btn.addEventListener('click', () => {
-        const isActive = item.classList.contains('active');
-        faqItems.forEach(i => i.classList.remove('active'));
-        if (!isActive) {
-          item.classList.add('active');
-        }
+    const button = item.querySelector('.faq-question');
+    if (!button) return;
+    button.setAttribute('aria-expanded', String(item.classList.contains('active')));
+    button.addEventListener('click', () => {
+      const open = !item.classList.contains('active');
+      faqItems.forEach(other => {
+        other.classList.remove('active');
+        other.querySelector('.faq-question')?.setAttribute('aria-expanded', 'false');
       });
-    }
-  });
-}
-
-// Initialize on DOM ready
-document.addEventListener('DOMContentLoaded', () => {
-  const savedLang = localStorage.getItem('argos_lang') || 'ko';
-  setLanguage(savedLang);
-
-  const langBtn = document.getElementById('btn-lang-toggle');
-  if (langBtn) {
-    langBtn.addEventListener('click', () => {
-      const nextLang = currentLang === 'ko' ? 'en' : 'ko';
-      setLanguage(nextLang);
-    });
-  }
-
-  const cliTabs = document.querySelectorAll('.cli-tab');
-  cliTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      const key = tab.getAttribute('data-cli');
-      switchCliTab(key);
+      item.classList.toggle('active', open);
+      button.setAttribute('aria-expanded', String(open));
     });
   });
-
-  initFaqAccordion();
-
-  // Mobile Menu Toggle
-  const mobileBtn = document.getElementById('mobile-menu-btn');
+  const mobileButton = document.getElementById('mobile-menu-btn');
   const navLinks = document.querySelector('.nav-links');
-  if (mobileBtn && navLinks) {
-    mobileBtn.addEventListener('click', () => {
-      navLinks.classList.toggle('active');
+  if (mobileButton && navLinks) {
+    mobileButton.setAttribute('aria-expanded', 'false');
+    mobileButton.addEventListener('click', () => {
+      mobileButton.setAttribute('aria-expanded', String(navLinks.classList.toggle('active')));
     });
-    navLinks.querySelectorAll('a').forEach(link => {
-      link.addEventListener('click', () => navLinks.classList.remove('active'));
-    });
+    navLinks.querySelectorAll('a').forEach(link => link.addEventListener('click', () => {
+      navLinks.classList.remove('active');
+      mobileButton.setAttribute('aria-expanded', 'false');
+    }));
   }
-
 });

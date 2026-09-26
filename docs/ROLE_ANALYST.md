@@ -1,82 +1,99 @@
-# Argos 보안 관제 요원 및 분석가(Security Analyst) 운영 가이드
+# Argos 보안 관제·분석가 가이드
 
-이 문서는 실시간 시스템 위협 이벤트를 관찰하고, 탐지 경보 상황 발생 시 세부 경로 변조 및 관련 프로세스 실행 정황을 AI 코파일럿과 함께 역추적하여 격리 및 사후 포렌식을 단행하는 **보안 관제 요원 및 분석가(Security Analyst / SOC Operator)**를 위한 상세 운영 매뉴얼입니다.
+분석가는 탐지 근거와 실제 대응 결과를 구분하고, 프로세스 신원·파일 변화·보호 누락을
+조사한 뒤 증거를 인계한다. 이 문서는 v0.2.0 기준이다. 정책 변경은
+[보안 관리자](ROLE_ADMINISTRATOR.md), 파일 복구는 [운영자](ROLE_OPERATOR.md)와 협업한다.
 
----
+## 조사 범위 확인
 
-## 1. 역할 정의 및 업무 범위
+CLI는 지정한 호스트의 로컬 DB를 읽는다. 중앙 대시보드는 에이전트 연결·보호 상태와
+탐지 요약을 제공하지만 모든 호스트의 원본 이벤트를 자동으로 모아 조사하는 기능은 없다.
+운영 서비스와 같은 설정을 지정한다.
 
-보안 관제 요원 및 분석가는 최일선에서 호스트 시스템의 감염 징후를 추적하고 악성 행위를 차단하는 방어 실행자입니다.
-- **주요 책임**:
-  - 중앙 대시보드 및 로컬 DB 경보 실시간 관찰.
-  - 침해 위협 발생 노드의 프로세스 및 파일 쓰기 감사 로그 분석.
-  - 인공지능 RAG 요약 분석 및 자연어 감사 질의 응답 도구 활용.
-  - 추가 변조 억제를 위한 시스템 네트워크 긴급 차단 및 해제 실행.
+```bash
+argos --config /etc/argos/argos.toml status
+argos --config /etc/argos/argos.toml threats -n 30
+argos --config /etc/argos/argos.toml events -n 50
+argos --config /etc/argos/argos.toml processes -n 20
+argos --config /etc/argos/argos.toml policy status --limit 100
+```
 
----
+생존 신호가 오래되거나 센서·표본·설정 분석이 누락되었으면 탐지 없음으로 안전을
+판정하지 않는다. `policy status`의 수락 기록 역시 현재 에이전트 가동 성공을 의미하지 않는다.
 
-## 2. 실시간 모니터링 및 위협 감사 절차
+## 근거·사건·자격 변화 조사
 
-침해 탐지가 통보되면 콘솔 터미널 또는 중앙 대시보드를 통해 즉각적인 위협 식별 절차에 착수합니다.
+`threats`에서 탐지 ID를 고른다. 아래 ID와 epoch 밀리초 값은 조사 대상에 맞게 바꾼다.
 
-### 2.1. 위협 목록 점검
-1. 최근 시스템에 선언된 위험 요소 목록을 조회하여 대상 식별 ID 및 위험 수준(`SEVERITY`), 스코어, 대표 피해 요약을 검사합니다:
-   ```bash
-   argos threats -n 30
-   ```
-2. 탐지 항목의 상세 파일 변경 활동 흐름을 역추적합니다:
-   ```bash
-   argos events -n 50
-   ```
-   - 특정 시간대에 단기간 집중적으로 발생한 `Modify` 또는 `Rename` 행동 데이터를 관측하여 랜섬웨어 감염 패턴을 가려냅니다.
+```bash
+argos --config /etc/argos/argos.toml incident 42 --window-secs 600 --limit 1000 --html /tmp/incident-42.html
+argos --config /etc/argos/argos.toml evidence --from-ms 1760000000000 --to-ms 1760000600000 --pid 1234 --limit 1000
+```
 
-### 2.2. 프로세스 감사 추적 (Linux 전용)
-- 위협을 유발한 PID의 실행 명령어 및 UID 권한, 그리고 부모 프로세스 관계(PPID)를 조사하여 백그라운드 공격 명령을 식별합니다:
-  ```bash
-  argos processes -n 20
-  ```
+`incident`는 탐지 앞뒤 각각 `window-secs`의 근거를 조회한다. HTML을 생략하면 JSON을
+출력한다. 시간·PID가 겹치는 이벤트는 연관 후보이며 인과관계가 확정된 것은 아니다.
+`total_rows`, 반환 건수와 `truncated`를 확인하고 조회 범위를 조절한다.
 
----
+| 근거 | 조사 시 구분할 사항 |
+| --- | --- |
+| 프로세스 | PID + 시작 ticks + boot ID를 함께 본다. 같은 PID의 다른 시작 신원은 다른 프로세스다. |
+| `credentials` | 네 가지 UID/GID와 capability 집합이다. `processes` 표의 UID는 유효 UID이며 전체 자격은 `evidence`/MCP JSON으로 확인한다. |
+| 파일 `content` | 앞·중간·끝 표본과 이전 관찰 대비 차이다. 파일 전체나 검증된 정상본을 뜻하지 않는다. |
+| `behavior.multi_window.*` | 여러 시간창의 신호다. 계정·경로·계보 집계의 PID 0을 종료 대상으로 해석하지 않는다. |
+| `linux.*` | 지정 SSH·sudo·cron·systemd 파일의 의미 변화다. 실제 서비스 적용·권한 획득 성공은 별도 확인한다. |
+| `response_results` | `succeeded`, `failed_or_unconfirmed`, `rejected`, `observed_threshold`를 구분한다. 관찰 모드 임계치 통과는 실행 성공이 아니다. |
 
-## 3. AI 기반 침해 요약 분석 및 코파일럿 활용
+`credentials=null`이나 부모 신원 누락은 추정해서 채우지 않는다. `/proc` 폴링은 짧게
+끝난 실행·자격 변화를 놓칠 수 있다. 상세한 범위는 [Linux 분석](FEATURE_LINUX_ANALYSIS.md),
+[탐지](FEATURE_DETECTION.md), [대응 결과](FEATURE_RESPONSE.md)를 참고한다.
 
-감염 상세 로그의 가독성 및 원인 파악 속도를 가속화하기 위해 Anthropic Claude API와 통합된 AI 분석 유틸리티를 호출합니다.
+## 근거 기반 AI 조사
 
-### 3.1. 위협 상세 사건 분석 (`explain`)
-- `argos threats`에서 확인한 고유 탐지 ID(예: 3번)를 주입해 인공지능 한국어 정밀 레포트를 요청합니다:
-  ```bash
-  argos explain 3
-  ```
-- **주요 출력 결과 해석**:
-  - **사고 요약**: 시스템에 위해를 가하고 있는 정황의 핵심 2줄 축약문입니다.
-  - **근거 분석**: 탐지를 촉발한 특정 프로세스 및 파일 쓰기 이벤트 패턴입니다.
-  - **오탐 가능성**: 정상적인 파일 대량 업로드나 로그 로테이션, 압축 백업 실행 시나리오와의 대조 분석 결과입니다.
-  - **권장 조치**: 보안 분석가가 즉시 실행할 프로세스 강제 종료 또는 격리 권고 가이드라인입니다.
+[AI 설정](FEATURE_AI.md)에서 Anthropic 또는 사내 Ollama 주소와 모델을 지정한 뒤 사용한다.
+모델은 `ai.model` 또는 `ARGOS_AI_MODEL`이 필요하며, Ollama에는 Anthropic 키가 필요하지 않다.
 
-### 3.2. 자연어 대화식 감사 질의 (`ask`)
-- 시스템 전체 감사 통계 데이터를 배경 문맥으로 주입하여 LLM 코파일럿에 자유롭게 질문을 던집니다:
-  ```bash
-  argos ask "지난 1시간 동안 root 권한으로 실행된 의심 행동이 있어?"
-  argos ask "가장 많은 수정을 발생시킨 PID 번호와 실행 경로를 로그에 근거해서 알려줘"
-  ```
+```bash
+argos --config /etc/argos/argos.toml explain 42
+argos --config /etc/argos/argos.toml ask "지난 1시간 동안 유효 UID 0 프로세스의 의심 근거와 누락을 설명해 줘"
+argos --config /etc/argos/argos.toml ask --from-ms 1760000000000 --to-ms 1760000600000 --pid 1234 "실제 대응 결과를 근거 ID와 함께 설명해 줘"
+```
 
----
+호출 전에 표시되는 기간·PID·조회 누락을 확인하고 답변의 근거 ID를 원본 JSON과 대조한다.
+AI는 조회 근거의 해석을 제공하며 차단·격리·복구를 실행하지 않는다. 기간 없는 질문은
+최근 24시간으로 처리하며 달력 기준이나 복잡한 시간 표현은 명시적 구간을 사용한다.
+AI에 전달되는 원본 근거는 증거 패키지의 기본 마스킹과 별개이므로 제공자와 전송 범위를
+조직 기준에 맞게 선택한다.
 
-## 4. 긴급 네트워크 격리 제어 (`isolate`)
+## 사건 보존과 담당자 인계
 
-추가적인 중요 기밀 유출이나 C2 감염 확산 차단이 극도로 시급한 경우 대상 시스템의 네트워크 연결을 즉시 차단합니다.
+```bash
+argos --config /etc/argos/argos.toml retention list --incident detection-42
+argos --config /etc/argos/argos.toml retention audit --incident detection-42
+argos --config /etc/argos/argos.toml evidence-export 42 --out /secure/export/incident-42 --window-secs 600 --limit 1000
+argos --config /etc/argos/argos.toml evidence-verify /secure/export/incident-42
+```
 
-1. **긴급 격리 개시**:
-   - 관리 서버 IP(전송 유지용)를 제외한 외부 아웃바운드 송신을 완전 거절 상태(`DROP`)로 전환합니다:
-     ```bash
-     sudo argos isolate
-     ```
-   - 특정 분석용 타겟 서버 IP(예: `10.0.0.99`)의 통신은 격리 중에도 인가하고 싶은 경우 예외 지정 처리합니다:
-     ```bash
-     sudo argos isolate --allow 10.0.0.99
-     ```
-2. **사태 진정 후 격리 해제**:
-   - 악성 프로세스 소거 및 포렌식 복원이 완전히 종결되면 격리를 해제해 방화벽 체인을 롤백합니다:
-     ```bash
-     sudo argos isolate --release
-     ```
+자동 사건 고정은 비동기 작업이다. 탐지가 있더라도 정상본 부재·대기·실패·큐 초과로
+참조가 없을 수 있으므로 완료 참조와 `backup.pin_*` 지표를 확인한다. 수동 고정은
+정상 여부와 별도로 증거를 보존하며 복구를 승인하지 않는다.
+
+증거 패키지는 새 디렉터리에 기록하고 기본적으로 경로·명령행·요약 등 민감 문자열을
+마스킹한다. 원문이 필요하면 허용 범위를 검토하고 `--include-sensitive`를 명시한다.
+해시는 파일 일관성을 검사하며 발급자 진위를 보증하지 않는다. 정책 스냅샷도 내보내는
+시점의 마지막 수락 정책이다. [패키지 범위](FEATURE_EVIDENCE_PACKAGE.md)를 인계 자료에 포함한다.
+
+## 네트워크 격리
+
+관리 SSH와 중앙 보고에 필요한 숫자 IP·방향·TCP 포트를 지정하고 계획을 먼저 확인한다.
+다음 주소는 예시다. 방화벽 적용은 Linux 관리자 권한이 필요하다.
+
+```bash
+argos isolate --dry-run --allow in:192.0.2.20:22 --allow out:10.0.0.5:8443
+sudo argos isolate --allow in:192.0.2.20:22 --allow out:10.0.0.5:8443
+sudo argos isolate --release
+```
+
+IP만 지정하는 예전 `--allow 10.0.0.99` 형식은 지원하지 않는다. 중앙 주소나 기존 SSH
+연결을 자동 허용하지 않으며 예외 없는 `isolate`는 관리 연결도 끊는다. IPv4·IPv6의
+INPUT/OUTPUT/FORWARD를 검사하지만 독립 네임스페이스·우회 데이터 경로까지 보장하지는
+않는다. 적용·부분 실패·해제 조건은 [격리 문서](FEATURE_RESPONSE.md)를 따른다.

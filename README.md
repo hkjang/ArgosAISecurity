@@ -5,8 +5,8 @@
 <h1 align="center">Argos AI Security</h1>
 
 <p align="center">
-  <strong>AI 기반 Linux 서버 보안 플랫폼</strong><br />
-  랜섬웨어 · 이상 행위 · 권한 상승 · 파일 변조 실시간 탐지 · 차단 · 복구
+  <strong>차단과 복구를 검증할 수 있는 Linux 보안 플랫폼</strong><br />
+  행위 탐지 · 정상 복구 지점 · 정책 신뢰 · 근거 기반 AI 조사
 </p>
 
 <p align="center">
@@ -15,34 +15,42 @@
 
 <hr />
 
-## 현재 상태: MVP Phase 1 + 2 + 3 핵심
+## 현재 릴리즈: v0.2.0
+
+[v0.2.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.2.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.2.0.md)
+
+2026-09-27 기준, 정책 재사용 방지·다중 시간 구간 탐지·Linux 설정 의미 감시·사건별 복구 지점 보존·증거 패키지를 제공합니다. 자동 차단은 기본 비활성이며 다중 시간 구간과 내용 표본 분석은 선택 활성화합니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
+
+워크스페이스 테스트 **144개**, 배포용 바이너리의 보안 시나리오 **8개**와 탐지·복구·인증 시험을 통과했습니다. 이는 운영 탐지율·성능 인증이 아니며 [검증 기록](docs/PLATFORM_VALIDATION.md)에 시험 범위를 구분했습니다.
 
 | 구성 요소 | 크레이트 | 상태 |
 | --- | --- | --- |
-| Agent Core (데몬, 파이프라인) | `argos-agent` | 구현 |
+| Agent Core (데몬, 파이프라인) | `argos-agent` | 탐지·대응, 상태 보고, 별도 백업·사건 보존·전송 작업자 |
 | 파일 이벤트 감시 | `argos-sensor` | notify(기본) + fanotify(Linux, pid 제공) |
-| 프로세스 감시 | `argos-sensor` | /proc 폴링 (Linux) → eBPF는 후속 |
-| 행위 기반 랜섬웨어 탐지 | `argos-detect` | 슬라이딩 윈도우 점수 + 엔트로피 |
-| 위험 프로세스 차단 | `argos-response` | Linux SIGKILL/SIGSTOP (기본 dry-run) |
-| 네트워크 격리 | `argos-response` | iptables 기반 (`argos isolate`) |
-| 로컬 로그 저장 | `argos-storage` | SQLite(WAL) |
-| 백업·복구 | `argos-recovery` | 내용 주소 저장 + 해시 검증 복구 |
-| 정책 서명·검증 | `argos-policy` | Ed25519 — 서명된 정책만 적용 |
-| AI Threat Summary / Copilot | `argos-brain` | Claude API (`argos explain` / `argos ask`) |
-| 중앙관리 서버 + 대시보드 | `argos-central` | REST API + HTML 대시보드 |
-| CLI | `argos-cli` | status/events/threats/processes/scan/doctor/restore/explain/ask/isolate/policy |
+| 프로세스 감시 | `argos-sensor` | Linux /proc 폴링, 같은 PID 실행 이미지·자격 정보 변화와 부모 신원 |
+| 행위 기반 랜섬웨어 탐지 | `argos-detect` | 센서별 점수·미끼 파일, 선택적 다중 시간 구간·내용 표본 |
+| Linux 설정 의미 감시 | `argos-agent` | 지정한 SSH 키·sudoers·cron·systemd 파일 변화 |
+| 위험 프로세스 차단 | `argos-response` | PID·시작 시각·부팅 ID 확인, pidfd 종료 및 결과 기록 |
+| 네트워크 격리 | `argos-response` | 명시적 관리 연결 허용, IPv4/IPv6 INPUT·OUTPUT·FORWARD 제한 |
+| 로컬 근거 저장 | `argos-storage` | SQLite(WAL), 전송 outbox·사건 보존 대기열 |
+| 백업·복구 | `argos-recovery` | 정상본 판정·미리보기·복구 시험, 사건별 보존과 승인 해제 |
+| 정책 신뢰·재생 | `argos-policy` | Ed25519, 버전·기간·대상·키 ID, 감사 기록·승인 롤백·과거 이벤트 비교 |
+| AI Threat Summary / Copilot | `argos-brain` | Anthropic/Ollama, 기간·PID별 근거 및 조회 누락 표시 |
+| 중앙관리 서버 + 대시보드 | `argos-central` | 인증된 등록·수집·조회, 생존 신호·전달 중복 제거 |
+| CLI | `argos-cli` | 운영 조회·복구·정책·조사, 조회형 MCP, HTML 보고서·증거 패키지 |
 
 ## 빌드 및 실행
 
 ```bash
 # 빌드 (Rust 1.86+, 릴리즈 검증: 1.93.1)
-cargo build --workspace
+cargo build --workspace --locked
 
 # 테스트
-cargo test --workspace
+cargo test --workspace --locked
 
-# 에이전트 실행 (argos.toml 없으면 기본값: ./watched 감시)
+# 에이전트 실행 (예제 설정의 ./watched 감시)
 cp config/argos.example.toml argos.toml
+mkdir -p watched argos-data
 cargo run -p argos-agent
 
 # 다른 터미널에서 CLI
@@ -54,30 +62,36 @@ cargo run -p argos-cli -- doctor
 
 # 파일 복구 (백업본에서)
 cargo run -p argos-cli -- restore ./watched/important.docx --list   # 버전 확인
+# 아래 복구는 검토 후 --mark-good으로 지정한 정상본이 있을 때 실행 (하단 절차 참고)
 cargo run -p argos-cli -- restore ./watched/important.docx          # 최신 정상 판정 버전 복구
 cargo run -p argos-cli -- restore ./watched/important.docx --before-ms 1760000000000
 
-# AI 사고 분석 / 자연어 질의 (ANTHROPIC_API_KEY 필요)
-export ANTHROPIC_API_KEY=sk-ant-...
+# AI 사고 분석 / 자연어 질의 (Anthropic 예; Ollama는 아래 안내 참고)
+export ANTHROPIC_API_KEY='<API 키>'
+export ARGOS_AI_MODEL='<사용할 모델 ID>'
 cargo run -p argos-cli -- explain 1                      # ID는 `argos threats`에서 확인
 cargo run -p argos-cli -- ask "지난 1시간 동안 위험한 활동 있었어?"
 
 # 프로세스 실행 이력 (Linux)
 cargo run -p argos-cli -- processes -n 20
 
-# 정책 서명·배포 (요건서 11장 — 서명된 정책만 적용)
+# 정책 서명·사전 확인 (정책 메타데이터·신뢰 키 설정은 정책 안내 참고)
+umask 077
 cargo run -p argos-cli -- policy gen-key > keys.txt      # 서명키/검증키 생성
-# policy.toml 작성 후:
+# keys.txt의 서명키 아래 64자리 hex 값만 signing.key에 저장하고 policy.toml 작성 후:
 cargo run -p argos-cli -- policy sign policy.toml --key-file signing.key
-cargo run -p argos-cli -- policy verify                  # argos.toml [policy] 설정 사용
-cargo run -p argos-cli -- policy show
+cargo run -p argos-cli -- policy verify                  # 읽기 전용 사전 확인
+# argos.toml [policy] 설정 후 에이전트를 재시작해야 운영 활성화
+cargo run -p argos-cli -- policy status                  # 수락·거부 감사 기록
+cargo run -p argos-cli -- policy show                    # 마지막 수락 정책
 
 # 네트워크 격리 (Linux, root)
 cargo run -p argos-cli -- isolate --allow in:192.0.2.20:22 --allow out:10.0.0.5:8420 --dry-run
-sudo cargo run -p argos-cli -- isolate --allow in:192.0.2.20:22 --allow out:10.0.0.5:8420
-sudo cargo run -p argos-cli -- isolate --release
+sudo ./target/debug/argos isolate --allow in:192.0.2.20:22 --allow out:10.0.0.5:8420
+sudo ./target/debug/argos isolate --release
 
 # 중앙관리 서버 + 대시보드
+export ARGOS_CENTRAL_TOKEN='<관리자 조회 토큰>'
 cargo run -p argos-central -- --listen 0.0.0.0:8420 --agent-tokens /etc/argos/agent-tokens.json
 # ARGOS_CENTRAL_TOKEN에는 조회용 관리자 토큰, agent-tokens.json에는 {"server-a":"개별토큰"}
 # 로컬 개발: cargo run -p argos-central -- --development --listen 127.0.0.1:8420
@@ -93,8 +107,8 @@ docker run --rm -v ${PWD}:/src -v argos-cargo-cache:/usr/local/cargo/registry -v
 
 ## 개발 환경 참고
 
-- 워크스페이스는 **Windows/macOS에서도 컴파일·실행**된다 (notify 센서가 크로스 플랫폼).
-  Linux 전용 기능(fanotify, 프로세스 차단)은 `cfg(target_os = "linux")`로 분리.
+- notify 센서와 Linux 조건부 컴파일 경계를 두어 Windows/macOS 개발을 고려한다.
+  이번 릴리즈의 실행 검증과 첨부 바이너리는 Linux x86_64 기준이다.
 - 운영 배포는 Linux 전용: systemd 유닛은 [packaging/argos-agent.service](packaging/argos-agent.service).
 
 ## 랜섬웨어 탐지·대응 동작
@@ -105,22 +119,22 @@ docker run --rm -v ${PWD}:/src -v argos-cargo-cache:/usr/local/cargo/registry -v
 4. 슬라이딩 윈도우(기본 10초)에서 점수 산정:
    - notify: 대량 변경 40 + 서로 다른 파일의 고엔트로피 비율 35 + 이름 변경·삭제 비율 25
    - fanotify: 대량 변경 40 + 서로 다른 파일의 고엔트로피 비율 60 (수정 이벤트만 수집)
-   - 최소 변경 파일 수·제외 경로 조건을 만족해야 대응 후보가 된다. 도달 불가능한 임계치는 시작 시 경고.
-5. 점수 ≥ 40 → 탐지 기록(+ 중앙 서버 보고), 점수 ≥ 80 + `auto_block=true` + pid 식별 → 프로세스 차단
+   - 행위 점수는 최소 변경 파일 수·제외 경로 조건을 적용한다. 미끼 파일 변조는 별도 95점 신호다. 도달 불가능한 임계치는 시작 시 경고.
+5. 기본 탐지 점수 ≥ 40 → 탐지 기록(+ 중앙 서버 보고). 개별 프로세스 대응 점수 ≥ 80이고 `auto_block=true`, 정책 유효성·PID·시작 ticks·부팅 ID 확인을 모두 충족하면 pidfd 종료 및 결과 기록
 6. 별도 크기 제한 큐에서 실제 수집 시각으로 백업. baseline·해시 일치만으로 정상본을 판정하지 않는다.
-7. 검토한 버전을 정상본으로 지정한 뒤 `argos restore <path> --before-ms <공격시각>`으로 해시 검증 복구
+7. 탐지와 사건 보존 요청을 함께 저장하고 별도 작업자가 관련 정상본을 고정. 검토한 버전은 `argos restore <path> --before-ms <공격시각>`으로 해시 검증 복구
 
 `detection.multi_window.enabled=true`로 10/60/600초별 임계치를 적용할 수 있다. 프로세스 인스턴스, 유효 UID+보호 경로, 보호 경로, 수집된 최대 4단계 부모 계보를 각각 평가한다. **계정·경로·계보 집계는 알림만 생성하며 현재 PID 차단 점수로 전환하지 않는다.** 승인 작업은 조정할 규칙 이름을 개별 지정해야 한다. 기본값은 두 기능 모두 비활성이다.
 
-이벤트·그룹·표본 이력은 상한이 있고 누락을 표시한다. 누락된 인스턴스 집계는 자동 차단 근거로 사용하지 않는다. 압축·이미지 등의 높은 엔트로피만으로 내용 변화 증거를 추가하지 않는다. 구체적인 설정과 합성 검증 범위는 [탐지 기능](docs/FEATURE_DETECTION.md), [설정 예시](config/argos.example.toml)를 참고한다. 샘플 밖 부분 암호화와 실제 운영 오탐률은 별도 검증 대상이다.
+이벤트·그룹·표본 이력은 상한이 있고 누락을 표시한다. 누락된 인스턴스 집계는 자동 차단 근거로 사용하지 않는다. 다중 위치 표본을 활성화하면 압축·이미지 등의 높은 엔트로피만으로 내용 변화 증거를 추가하지 않는다. 기본 앞부분 엔트로피 평가는 압축 파일에도 높은 점수를 줄 수 있다. 구체적인 설정과 합성 검증 범위는 [탐지 기능](docs/FEATURE_DETECTION.md), [설정 예시](config/argos.example.toml)를 참고한다. 샘플 밖 부분 암호화와 실제 운영 오탐률은 별도 검증 대상이다.
 
 ## 알려진 한계 (로드맵)
 
-- `notify` 센서는 pid가 없어 호스트 단위 탐지만 가능. `sensor = "fanotify"`(Linux, root)로 전환하면
-  수정 이벤트에 원인 pid가 포함되어 프로세스 단위 차단이 동작한다.
-  fanotify는 수정 계열 이벤트만 수집하며, 생성/삭제/이름변경 + 프로세스·네트워크 감시는 Phase 3 eBPF에서 확장.
+- `notify` 센서는 원인 PID가 없어 파일·경로 집계에 사용하며 개별 프로세스를 차단할 수 없다. `sensor = "fanotify"`(Linux, root)로 전환하면
+  수정 이벤트에 원인 pid가 포함된다. 실제 차단에는 프로세스 신원 확인과 유효한 대응 정책도 필요하다.
+  fanotify는 수정 계열 이벤트만 수집한다. 프로세스 감시는 /proc 폴링이며, eBPF 실행·네트워크 이벤트 수집은 후속 범위다.
 - 중앙 서버 운영 모드는 관리자 조회 토큰과 에이전트별 수집 토큰을 필수로 요구한다. HTTPS는 별도 TLS 프록시에서 구성하며 mTLS 인증서는 후속 단계다.
-- 서명 정책 수동 적용·중앙 대시보드·근거 기반 AI 질의는 구현되어 있다. 중앙 자동 정책 배포와 추가 탐지·정책 신뢰성 강화는 [후속 개발 계획](docs/ROADMAP.md)을 참고한다.
+- 서명 정책의 버전·기간·대상 검증은 구현되어 있다. 중앙 자동 정책 배포, 외부 승인자 인증, 실행 파일 신뢰·서비스 영향 분석은 [후속 개발 계획](docs/ROADMAP.md)을 참고한다.
 
 ## 안전한 복구와 정책 사전 검증
 
@@ -168,3 +182,13 @@ argos mcp # 설정한 단일 호스트 DB를 조회하는 stdio MCP 서버
 - 실제 임시 파일·프로세스를 사용하는 시나리오: `python3 scripts/security-scenarios.py --bin-dir target/debug --report /tmp/argos-scenarios.json`
 
 다중 시간 구간·내용 표본은 예제 설정에서 선택 활성화한다. 자동 차단 기본값은 비활성이다. 운영 탐지율·처리량이나 외부 승인자 인증은 별도 검증·연동 범위다.
+
+## 문서 안내
+
+| 목적 | 문서 |
+| --- | --- |
+| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.2.0 변경 사항](docs/releases/v0.2.0.md) |
+| 일상 운영·사고 조사 | [운영자](docs/ROLE_OPERATOR.md), [분석가](docs/ROLE_ANALYST.md), [관리자](docs/ROLE_ADMINISTRATOR.md) |
+| 명령·서비스 설정 | [CLI](docs/SERVICE_CLI.md), [에이전트](docs/SERVICE_AGENT.md), [중앙 서버](docs/SERVICE_CENTRAL.md) |
+| 구현과 후속 요구 | [아키텍처](docs/ARCHITECTURE.md), [코드 분석](docs/SOURCE_CODE_ANALYSIS.md), [요건서](docs/REQUIREMENTS.md), [로드맵](docs/ROADMAP.md) |
+| 검증 및 재현 | [플랫폼 검증 기록](docs/PLATFORM_VALIDATION.md) |

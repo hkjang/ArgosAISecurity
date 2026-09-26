@@ -42,6 +42,26 @@ cargo test -p argos-storage -p argos-policy -p argos-agent -p argos-central
 
 탐지·중앙 전송·사건 보존 요청을 같은 이벤트 DB 트랜잭션으로 기록한다. 보존 전용 스레드는 최대 16건씩 읽은 후 이벤트 DB 읽기 잠금을 해제하고 백업 DB에서 고정을 처리한다. 백업 쓰기 잠금이 다음 탐지·대응을 기다리게 하지 않는다. 실패는 1~60초 지연으로 재시도하고, 재시작 시 미완료 요청부터 이어간다. 사건/버전 고유 참조가 부분 성공·ACK 유실의 중복을 막는다.
 
-보존 요청 상한은 10,000건이다. 초과 시 탐지 자체는 기록하고 누락을 영속 계수한다. 보호 상태의 `backup.pin_pending`, `pin_failed`, `pin_overflow`, `pin_completed`, `pin_worker_errors`로 대기·실패·누락·완료·작업자 오류를 구분한다. 큐 초과나 작업자 오류는 보호 상태를 저하로 표시한다. 보존 완료 전에도 기존 정상본 보존 규칙은 유지되지만, 요청이 성공하기 전에 정상 판정을 수동 취소하면 사건 고정을 보장하지 못한다.
+자동 보존은 백업이 활성화되어 있고 탐지 점수가 0보다 클 때 요청한다. 보존 요청 상한은 10,000건이다. 초과 시 탐지 자체는 기록하고 누락을 영속 계수한다. 보호 상태의 `backup.pin_pending`, `pin_failed`, `pin_overflow`, `pin_completed`, `pin_worker_errors`로 대기·실패·누락·완료·작업자 오류를 구분한다. 큐 초과나 작업자 오류는 보호 상태를 저하로 표시한다. 보존 완료 전에도 기존 정상본 보존 규칙은 유지되지만, 요청이 성공하기 전에 정상 판정을 수동 취소하면 사건 고정을 보장하지 못한다.
 
 `analysis_incomplete`는 최근 분석에서 표본 읽기 실패 또는 집계 근거 상한에 도달했음을, `semantic_unavailable`는 현재 읽지 못하는 지정 설정 파일 수를 표시한다. 센서가 살아 있는 것만으로 모든 분석이 성공했다고 표시하지 않는다.
+
+
+## 운영 조회
+
+```bash
+argos --config /etc/argos/argos.toml status
+argos --config /etc/argos/argos.toml recovery-status
+argos --config /etc/argos/argos.toml retention list --incident detection-42
+argos --config /etc/argos/argos.toml policy status --limit 100
+```
+
+`status`는 최근 로컬 상태 파일을 읽는다. 기본 DB가 `/var/lib/argos/argos.db`이면
+상태 파일은 `/var/lib/argos/argos.health.json`이다. 중앙에는 전체 상세 JSON 대신
+합산한 `sensor_healthy`와 전송 대기·실패 건수를 보고한다. 중앙 연결 `online`과
+로컬 보존 요청 완료는 다른 상태다.
+
+`backup.pin_failed`·`pin_overflow`·`pin_completed`는 이벤트 DB에 보존된 누적 계수이고,
+`pin_pending`은 현재 대기 건수다. 완료 건수는 성공 처리한 요청 수이며 고정한 파일·
+버전 수가 아니다. `pin_worker_errors`는 현재 작업자 실행 중 오류 계수다. 과거 실패
+횟수가 남더라도 재시도로 완료될 수 있으므로 대기 건수·실제 보존 참조와 함께 본다.
