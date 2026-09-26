@@ -35,6 +35,7 @@ pub struct AgentConfig {
     pub policy: PolicyFileConfig,
     pub process_monitor: ProcessMonitorConfig,
     pub ai: AiConfig,
+    pub semantic: SemanticConfig,
 }
 
 impl Default for AgentConfig {
@@ -50,6 +51,24 @@ impl Default for AgentConfig {
             policy: PolicyFileConfig::default(),
             process_monitor: ProcessMonitorConfig::default(),
             ai: AiConfig::default(),
+            semantic: SemanticConfig::default(),
+        }
+    }
+}
+
+/// 명시적으로 선택한 Linux 설정 파일의 의미 변화 감시. 감시 경로에도 포함해야 한다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SemanticConfig {
+    pub files: Vec<PathBuf>,
+    pub max_file_bytes: usize,
+}
+
+impl Default for SemanticConfig {
+    fn default() -> Self {
+        Self {
+            files: Vec::new(),
+            max_file_bytes: 262_144,
         }
     }
 }
@@ -87,8 +106,18 @@ impl Default for AiConfig {
 pub struct PolicyFileConfig {
     /// 정책 파일 경로. 비어 있으면 argos.toml의 값을 그대로 사용.
     pub path: PathBuf,
-    /// Ed25519 검증키 (hex 64자). path 설정 시 필수 — 없으면 정책 미적용.
+    /// 이전 CLI 서명 확인용 검증키. 활성화에는 trusted_keys를 사용한다.
     pub pubkey: String,
+    /// 로컬에서 승인한 정책 계열 ID. 서명된 policy_id와 같아야 한다.
+    pub policy_id: String,
+    /// 로컬 서버 ID와 서버 그룹. 정책 파일이 이 값을 재정의할 수 없다.
+    pub host_id: String,
+    pub groups: Vec<String>,
+    /// 로컬 신뢰 목록: 서명키 ID -> Ed25519 공개키(hex 64자).
+    pub trusted_keys: std::collections::BTreeMap<String, String>,
+    /// 정책 상태 DB. 기본: <db_path>.policy-state/state.sqlite3.
+    /// 별도 경로 사용 시 전용 디렉터리는 현재 계정 소유, 권한 0700이어야 한다.
+    pub state_path: PathBuf,
 }
 
 impl PolicyFileConfig {
@@ -136,6 +165,94 @@ pub struct DetectionConfig {
     pub approved_changes: Vec<ApprovedChange>,
     /// 변경·삭제·이름 변경을 고위험 신호로 취급하는 미끼 파일의 정확한 경로.
     pub canary_paths: Vec<PathBuf>,
+    /// 여러 시간창과 보호 경로 집계. 명시적으로 켠 경우에만 평가한다.
+    pub multi_window: MultiWindowConfig,
+    /// 총 읽기 예산을 앞·중간·끝에 분배하는 내용 관찰. 정상본 판정이 아니다.
+    pub content_sampling: ContentSamplingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DetectionWindow {
+    pub window_secs: u64,
+    pub min_changed_files: usize,
+    pub mass_change_threshold: usize,
+    pub detect_score: f64,
+}
+
+impl Default for DetectionWindow {
+    fn default() -> Self {
+        Self {
+            window_secs: 10,
+            min_changed_files: 5,
+            mass_change_threshold: 30,
+            detect_score: 65.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MultiWindowConfig {
+    pub enabled: bool,
+    pub windows: Vec<DetectionWindow>,
+    pub protected_paths: Vec<PathBuf>,
+    pub aggregate_by_user: bool,
+    pub aggregate_by_ancestry: bool,
+    pub max_events: usize,
+    pub max_groups: usize,
+    pub max_path_bytes: usize,
+}
+
+impl Default for MultiWindowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            windows: vec![
+                DetectionWindow::default(),
+                DetectionWindow {
+                    window_secs: 60,
+                    min_changed_files: 8,
+                    mass_change_threshold: 40,
+                    detect_score: 65.0,
+                },
+                DetectionWindow {
+                    window_secs: 600,
+                    min_changed_files: 12,
+                    mass_change_threshold: 60,
+                    detect_score: 65.0,
+                },
+            ],
+            protected_paths: Vec::new(),
+            aggregate_by_user: true,
+            aggregate_by_ancestry: true,
+            max_events: 10_000,
+            max_groups: 2048,
+            max_path_bytes: 4096,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContentSamplingConfig {
+    pub enabled: bool,
+    pub total_bytes: usize,
+    pub max_files: usize,
+    pub history_secs: u64,
+    pub min_entropy_increase: f64,
+}
+
+impl Default for ContentSamplingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            total_bytes: 64 * 1024,
+            max_files: 2048,
+            history_secs: 600,
+            min_entropy_increase: 1.0,
+        }
+    }
 }
 
 /// 승인된 작업. 파일 변경 이벤트의 불변 프로세스 맥락이 있어야 적용한다.
@@ -163,6 +280,8 @@ impl Default for DetectionConfig {
             exclude_paths: Vec::new(),
             approved_changes: Vec::new(),
             canary_paths: Vec::new(),
+            multi_window: MultiWindowConfig::default(),
+            content_sampling: ContentSamplingConfig::default(),
         }
     }
 }

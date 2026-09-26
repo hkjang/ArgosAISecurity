@@ -20,6 +20,10 @@ pub struct Evaluation {
     pub alert: Option<Detection>,
     /// 해당 이벤트의 행위 룰 증거를 제외한 승인 작업 ID (감사용).
     pub approved_change_id: Option<String>,
+    /// 집계·추가 시간창의 알림. 집계 결과로 현재 PID를 자동 차단하지 않는다.
+    pub additional_alerts: Vec<Detection>,
+    /// 메모리 상한 또는 지원하지 않는 증거 때문에 일부 관찰을 제외했다.
+    pub evidence_truncated: bool,
 }
 
 impl Evaluation {
@@ -39,7 +43,7 @@ struct WindowEntry {
     timestamp_ms: u64,
     path: String,
     action: FileAction,
-    entropy: Option<f64>,
+    encryption_signal: bool,
 }
 
 /// pid별 슬라이딩 윈도우를 유지하며 행위 점수를 계산한다.
@@ -54,6 +58,7 @@ pub struct BehaviorScorer {
     last_emit: HashMap<Pid, (u64, f64)>,
     /// PID 재사용이나 재부팅 시 이전 프로세스의 위험 점수를 이어받지 않는다.
     process_identities: HashMap<Pid, Option<(u64, String)>>,
+    incomplete_until: Option<u64>,
 }
 
 /// 쿨다운 중이라도 점수가 이만큼 오르면 다시 보고한다 (사고 악화 감지).
@@ -71,6 +76,7 @@ impl BehaviorScorer {
             windows: HashMap::new(),
             last_emit: HashMap::new(),
             process_identities: HashMap::new(),
+            incomplete_until: None,
         }
     }
 
@@ -88,6 +94,70 @@ impl BehaviorScorer {
         event: &FileEvent,
         approved_change_id: Option<String>,
     ) -> Evaluation {
+        let horizon = event
+            .timestamp_ms
+            .saturating_sub(self.config.window_secs.saturating_mul(1000));
+        self.windows.retain(|_, window| {
+            window.retain(|entry| entry.timestamp_ms >= horizon);
+            !window.is_empty()
+        });
+        self.last_emit
+            .retain(|pid, _| self.windows.contains_key(pid));
+        self.process_identities
+            .retain(|pid, _| self.windows.contains_key(pid));
+        let max_groups = self.config.multi_window.max_groups.clamp(1, 16_384);
+        let max_events = self.config.multi_window.max_events.clamp(1, 100_000);
+        if !self.windows.contains_key(&event.pid) && self.windows.len() >= max_groups {
+            if let Some(oldest) = self
+                .windows
+                .iter()
+                .min_by_key(|(pid, events)| (events.back().map_or(0, |e| e.timestamp_ms), **pid))
+                .map(|(pid, _)| *pid)
+            {
+                self.windows.remove(&oldest);
+                self.last_emit.remove(&oldest);
+                self.process_identities.remove(&oldest);
+            }
+            self.incomplete_until = Some(
+                event
+                    .timestamp_ms
+                    .saturating_add(self.config.window_secs.saturating_mul(1000)),
+            );
+        }
+        let mut count: usize = self.windows.values().map(VecDeque::len).sum();
+        while count >= max_events {
+            if let Some(oldest) = self
+                .windows
+                .iter()
+                .filter(|(_, entries)| !entries.is_empty())
+                .min_by_key(|(pid, entries)| (entries.front().unwrap().timestamp_ms, **pid))
+                .map(|(pid, _)| *pid)
+            {
+                self.windows.get_mut(&oldest).unwrap().pop_front();
+            }
+            count -= 1;
+            self.incomplete_until = Some(
+                event
+                    .timestamp_ms
+                    .saturating_add(self.config.window_secs.saturating_mul(1000)),
+            );
+        }
+        if event.path.len() > self.config.multi_window.max_path_bytes
+            || event
+                .process
+                .as_ref()
+                .is_some_and(|p| p.boot_id.len() > 128)
+        {
+            return Evaluation {
+                score: 0.0,
+                pid: event.pid,
+                eligible: false,
+                alert: None,
+                approved_change_id,
+                additional_alerts: Vec::new(),
+                evidence_truncated: true,
+            };
+        }
         let identity = event
             .process
             .as_ref()
@@ -107,7 +177,7 @@ impl BehaviorScorer {
                 timestamp_ms: event.timestamp_ms,
                 path: event.path.clone(),
                 action: event.action,
-                entropy: event.entropy,
+                encryption_signal: crate::entropy::encryption_signal(event, &self.config),
             });
         }
 
@@ -125,9 +195,16 @@ impl BehaviorScorer {
         let mut evaluation = Evaluation {
             score,
             pid: event.pid,
-            eligible: changed_files.len() >= self.config.min_changed_files,
+            eligible: changed_files.len() >= self.config.min_changed_files
+                && !self
+                    .incomplete_until
+                    .is_some_and(|until| event.timestamp_ms <= until),
             alert: None,
             approved_change_id,
+            additional_alerts: Vec::new(),
+            evidence_truncated: self
+                .incomplete_until
+                .is_some_and(|until| event.timestamp_ms <= until),
         };
         if !evaluation.eligible || score < self.config.detect_score {
             return evaluation;
@@ -181,11 +258,7 @@ impl BehaviorScorer {
             .count();
         let high_entropy_paths: HashSet<&str> = window
             .iter()
-            .filter(|e| {
-                config.entropy_sample_bytes > 0
-                    && e.action == FileAction::Modify
-                    && e.entropy.map_or(false, |x| x >= config.entropy_threshold)
-            })
+            .filter(|e| e.action == FileAction::Modify && e.encryption_signal)
             .map(|e| e.path.as_str())
             .collect();
 
@@ -214,7 +287,7 @@ impl BehaviorScorer {
         (mass + enc + churn).min(100.0)
     }
 
-    fn severity(score: f64) -> Severity {
+    pub(crate) fn severity(score: f64) -> Severity {
         if score >= 85.0 {
             Severity::Critical
         } else if score >= 65.0 {
@@ -241,6 +314,7 @@ mod tests {
             size: None,
             entropy,
             process: None,
+            content: None,
         }
     }
 
@@ -457,5 +531,25 @@ mod tests {
             left.evaluate(&event(20000, "/home/later", FileAction::Modify, Some(7.9)));
         assert!(!after_window.eligible);
         assert!(after_window.alert.is_none());
+    }
+
+    #[test]
+    fn legacy_windows_and_identity_caches_obey_memory_limits() {
+        let mut config = DetectionConfig::default();
+        config.multi_window.max_events = 6;
+        config.multi_window.max_groups = 2;
+        let mut scorer = BehaviorScorer::with_sensor(config, SensorKind::Fanotify);
+        for i in 0..100 {
+            let mut e = event(i, &format!("/home/{i}"), FileAction::Modify, Some(7.9));
+            e.pid = i as u32 + 1;
+            let result = scorer.evaluate(&e);
+            assert!(scorer.windows.len() <= 2);
+            assert!(scorer.windows.values().map(VecDeque::len).sum::<usize>() <= 6);
+            assert!(scorer.process_identities.len() <= 2 && scorer.last_emit.len() <= 2);
+            if i > 1 {
+                assert!(result.evidence_truncated);
+                assert!(!result.eligible);
+            }
+        }
     }
 }

@@ -27,6 +27,33 @@ entropy_sample_bytes = 65536
 # 오탐 방지: 점수 계산 제외 경로 (백업, 로그 로테이션, DB dump 등)
 exclude_paths = []
 
+# 저속·분산 변경 집계는 명시적으로 활성화한다. 아래 블록의 주석을 해제할 때
+# protected_paths를 실제 절대 경로로 지정한다. 집계만으로 현재 PID를 종료하지 않는다.
+# [detection.multi_window]
+# enabled = true
+# protected_paths = ["/srv/data"]
+# aggregate_by_user = true
+# aggregate_by_ancestry = true
+# max_events = 10000
+# max_groups = 2048
+# max_path_bytes = 4096
+# windows = [
+#   { window_secs = 10, min_changed_files = 5, mass_change_threshold = 30, detect_score = 65.0 },
+#   { window_secs = 60, min_changed_files = 8, mass_change_threshold = 40, detect_score = 65.0 },
+#   { window_secs = 600, min_changed_files = 12, mass_change_threshold = 60, detect_score = 65.0 },
+# ]
+# 승인 작업에서 집계를 조정할 때는 behavior.multi_window.instance / user_path /
+# protected_path / ancestor를 각각 전체 이름으로 adjusted_rules에 명시한다.
+
+# 앞·중간·끝을 합친 총 읽기 예산이다. 기존 앞부분 읽기에 추가하지 않는다.
+# 이전 관찰과의 엔트로피 차이는 정상본 판정이 아니며 미관측 구간은 남는다.
+# [detection.content_sampling]
+# enabled = true
+# total_bytes = 65536
+# max_files = 2048
+# history_secs = 600
+# min_entropy_increase = 1.0
+
 [response]
 # true: 차단 점수 초과 시 프로세스 자동 종료 (Linux 전용)
 # false: 탐지·로그만 (권장 초기값 — 요건서 18. 단계적 차단)
@@ -50,12 +77,21 @@ queue_capacity = 256
 io_bytes_per_sec = 10485760
 
 [policy]
-# 서명된 정책 파일 사용 (요건서 11장 — 서명된 정책만 적용).
-# 1) argos policy gen-key  2) policy.toml 작성  3) argos policy sign policy.toml --key-file <서명키>
-# path = "/etc/argos/policy.toml"
-# pubkey = "<검증키 hex 64자>"
+# 비어 있으면 로컬 탐지/대응 설정 사용. 설정한 정책 검증 실패 시 시작을 중단한다.
+# 키 생성/서명: argos policy gen-key / argos policy sign policy.toml --key-file <비밀키 파일>
+# 운영 활성화에는 아래 ID/대상/신뢰 키 및 정책 메타데이터가 필수다.
+# 사용법·이전 형식 마이그레이션: docs/FEATURE_POLICY.md
 path = ""
-pubkey = ""
+policy_id = ""
+host_id = ""
+groups = []
+# 기본 상태: <db_path>.policy-state/state.sqlite3 (전용 디렉터리 0700, 파일 0600)
+# state_path = "/var/lib/argos/policy-state/state.sqlite3"
+# 이전 pubkey는 CLI 서명 확인만 지원하며 운영 활성화에는 사용하지 않는다.
+# pubkey = "<이전 공개키 hex 64자>"
+
+[policy.trusted_keys]
+# release-2026 = "<Ed25519 공개키 hex 64자>"
 
 [process_monitor]
 # 프로세스 실행 감시 (/proc 폴링, Linux 전용)
@@ -82,3 +118,9 @@ api_key_env = ""
 timeout_secs = 60
 # 각 이벤트 종류별 근거 상한; 초과 건수는 AI 입력·CLI에 명시
 evidence_limit = 200
+
+[semantic]
+# 지원하는 Linux 설정 파일을 절대 경로로 명시. watch_paths에도 포함해야 한다.
+# 예: files = ["/etc/sudoers", "/etc/systemd/system/example.service"]
+files = []
+max_file_bytes = 262144

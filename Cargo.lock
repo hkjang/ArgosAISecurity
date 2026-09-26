@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "argos-agent"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
  "argos-detect",
@@ -85,7 +85,9 @@ dependencies = [
  "argos-sensor",
  "argos-storage",
  "clap",
+ "libc",
  "reqwest",
+ "rusqlite",
  "serde_json",
  "tokio",
  "tracing",
@@ -94,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "argos-brain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
  "argos-storage",
@@ -106,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "argos-central"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
  "axum",
@@ -121,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "argos-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-brain",
  "argos-common",
@@ -131,13 +133,15 @@ dependencies = [
  "argos-response",
  "argos-storage",
  "clap",
+ "libc",
  "serde_json",
+ "sha2",
  "toml",
 ]
 
 [[package]]
 name = "argos-common"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -147,24 +151,28 @@ dependencies = [
 
 [[package]]
 name = "argos-detect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
+ "libc",
  "tracing",
 ]
 
 [[package]]
 name = "argos-policy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
  "argos-detect",
  "argos-storage",
  "ed25519-dalek",
  "hex",
+ "libc",
  "rand_core 0.6.4",
+ "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "toml",
  "tracing",
@@ -172,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "argos-recovery"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
  "hex",
@@ -186,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "argos-response"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
  "libc",
@@ -196,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "argos-sensor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
  "libc",
@@ -209,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "argos-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argos-common",
  "rusqlite",

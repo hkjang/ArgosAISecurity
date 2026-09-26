@@ -151,6 +151,7 @@ fn changed_processes(
                     || old.comm != event.comm
                     || old.cmdline != event.cmdline
                     || old.uid != event.uid
+                    || old.credentials != event.credentials
             })
         })
         .cloned()
@@ -206,6 +207,29 @@ fn parse_uid(status: &str) -> io::Result<u32> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "프로세스 유효 UID 없음"))
 }
 
+fn parse_credentials(status: &str) -> Option<argos_common::ProcessCredentials> {
+    let field = |name: &str| status.lines().find_map(|line| line.strip_prefix(name));
+    let ids = |name| -> Option<[u32; 4]> {
+        field(name)?
+            .split_whitespace()
+            .map(str::parse)
+            .collect::<Result<Vec<u32>, _>>()
+            .ok()?
+            .try_into()
+            .ok()
+    };
+    let cap = |name| u64::from_str_radix(field(name)?.trim(), 16).ok();
+    Some(argos_common::ProcessCredentials {
+        uids: ids("Uid:")?,
+        gids: ids("Gid:")?,
+        cap_inheritable: cap("CapInh:")?,
+        cap_permitted: cap("CapPrm:")?,
+        cap_effective: cap("CapEff:")?,
+        cap_bounding: cap("CapBnd:")?,
+        cap_ambient: cap("CapAmb:")?,
+    })
+}
+
 /// 수집 시점의 프로세스 정보를 읽는다. 종료·접근 거부·신원 변경은 None으로 반환한다.
 pub fn read_process(pid: u32) -> Option<ProcessEvent> {
     if pid == 0 {
@@ -219,18 +243,68 @@ pub fn read_process(pid: u32) -> Option<ProcessEvent> {
 /// 파일 이벤트를 보강하는 완전한 프로세스 맥락. 신원을 확인하지 못하면 정책 예외를 허용하지 않는다.
 pub fn read_file_process_context(pid: u32) -> Option<argos_common::FileProcessContext> {
     let process = read_process(pid)?;
+    let mut ancestors = Vec::new();
+    let mut child = process.clone();
+    for _ in 0..4 {
+        if child.ppid == 0
+            || child.ppid == pid
+            || ancestors
+                .iter()
+                .any(|p: &argos_common::ProcessIdentity| p.pid == child.ppid)
+        {
+            break;
+        }
+        let Some(parent) = read_process(child.ppid) else {
+            break;
+        };
+        let (Some(start), Some(boot)) = (parent.start_time_ticks, parent.boot_id.as_ref()) else {
+            break;
+        };
+        if start == 0
+            || Some(boot) != process.boot_id.as_ref()
+            || child.start_time_ticks.is_some_and(|v| start > v)
+        {
+            break;
+        }
+        let Some(confirmed_child) = read_process(child.pid) else {
+            break;
+        };
+        if confirmed_child.start_time_ticks != child.start_time_ticks
+            || confirmed_child.ppid != parent.pid
+        {
+            break;
+        }
+        ancestors.push(argos_common::ProcessIdentity {
+            pid: parent.pid,
+            start_time_ticks: start,
+            boot_id: boot.clone(),
+        });
+        child = parent;
+    }
+    let confirmed = read_process(pid)?;
+    if confirmed.start_time_ticks != process.start_time_ticks
+        || confirmed.exe != process.exe
+        || confirmed.uid != process.uid
+        || confirmed.ppid != process.ppid
+        || confirmed.boot_id != process.boot_id
+    {
+        return None;
+    }
     Some(argos_common::FileProcessContext {
         uid: process.uid,
         exe: process.exe?,
         start_time_ticks: process.start_time_ticks?,
         boot_id: process.boot_id?,
+        ancestors,
     })
 }
 
 fn read_process_at(proc_root: &Path, pid: u32, boot_id: Option<&str>) -> io::Result<ProcessEvent> {
     let dir = proc_root.join(pid.to_string());
     let before = parse_stat(&std::fs::read_to_string(dir.join("stat"))?, pid)?;
-    let uid = parse_uid(&std::fs::read_to_string(dir.join("status"))?)?;
+    let status = std::fs::read_to_string(dir.join("status"))?;
+    let uid = parse_uid(&status)?;
+    let credentials = parse_credentials(&status);
     let command = std::fs::read(dir.join("cmdline"))?;
     let cmdline = command
         .split(|&byte| byte == 0)
@@ -245,11 +319,13 @@ fn read_process_at(proc_root: &Path, pid: u32, boot_id: Option<&str>) -> io::Res
     let confirmed_exe = std::fs::read_link(dir.join("exe"))
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
-    let confirmed_uid = parse_uid(&std::fs::read_to_string(dir.join("status"))?)?;
+    let confirmed_status = std::fs::read_to_string(dir.join("status"))?;
+    let confirmed_uid = parse_uid(&confirmed_status)?;
     if before.start_time_ticks != after.start_time_ticks
         || before.comm != after.comm
         || exe != confirmed_exe
         || uid != confirmed_uid
+        || credentials != parse_credentials(&confirmed_status)
     {
         return Err(io::Error::new(
             io::ErrorKind::WouldBlock,
@@ -261,6 +337,7 @@ fn read_process_at(proc_root: &Path, pid: u32, boot_id: Option<&str>) -> io::Res
         pid,
         ppid: after.ppid,
         uid,
+        credentials,
         start_time_ticks: Some(after.start_time_ticks),
         boot_id: boot_id.map(str::to_owned),
         exe,
@@ -287,6 +364,7 @@ mod tests {
             pid,
             ppid: 1,
             uid: 1000,
+            credentials: None,
             start_time_ticks: Some(start),
             boot_id: Some("boot-a".into()),
             exe: Some("/usr/bin/job".into()),
@@ -312,6 +390,27 @@ mod tests {
         assert!(parse_uid("Name: job\n").is_err());
         assert!(parse_uid("Uid: invalid").is_err());
         assert!(parse_uid("Uid: 1000").is_err());
+    }
+
+    #[test]
+    fn credentials_preserve_real_effective_and_capability_changes() {
+        let status="Uid: 1000 0 0 0\nGid: 1000 1000 1000 1000\nCapInh: 0\nCapPrm: 0000000000000001\nCapEff: 0000000000000001\nCapBnd: 000000000000ffff\nCapAmb: 0\n";
+        let creds = parse_credentials(status).unwrap();
+        assert_eq!(creds.uids, [1000, 0, 0, 0]);
+        assert_eq!(creds.cap_effective, 1);
+        assert!(parse_credentials("Uid: 1000 0 0 0").is_none());
+        let mut original = process(42, 10);
+        original.credentials = Some(creds.clone());
+        let mut changed = original.clone();
+        changed.credentials.as_mut().unwrap().cap_effective = 0;
+        assert_eq!(
+            changed_processes(
+                &HashMap::from([(42, original)]),
+                &HashMap::from([(42, changed)])
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]

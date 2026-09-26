@@ -30,6 +30,36 @@ pub struct FileEvent {
     /// 수집 시점에 확인한 프로세스 맥락. 이전 이벤트·PID 미지원 센서는 None.
     #[serde(default)]
     pub process: Option<FileProcessContext>,
+    /// 당시의 제한된 다중 위치 샘플. 이전 관측은 정상본 판정이 아니다.
+    #[serde(default)]
+    pub content: Option<ContentEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentEvidence {
+    pub observed_at_ms: u64,
+    pub file_size: u64,
+    pub sampled_bytes: usize,
+    pub budget_bytes: usize,
+    pub file_type: String,
+    pub samples: Vec<ContentSample>,
+    pub complete: bool,
+    pub previous_observed_at_ms: Option<u64>,
+    pub max_entropy_increase: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentSample {
+    pub offset: u64,
+    pub length: u32,
+    pub entropy: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ProcessIdentity {
+    pub pid: Pid,
+    pub start_time_ticks: u64,
+    pub boot_id: String,
 }
 
 /// 파일 이벤트에 고정해 보관하는 프로세스 식별·승인 작업 매칭 근거.
@@ -39,6 +69,22 @@ pub struct FileProcessContext {
     pub exe: String,
     pub start_time_ticks: u64,
     pub boot_id: String,
+    /// 수집 시점에 확인한 가까운 부모부터 최대 4단계. 미확인은 빈 목록.
+    #[serde(default)]
+    pub ancestors: Vec<ProcessIdentity>,
+}
+
+/// /proc status의 네 가지 UID/GID 및 capability 집합. 미수집은 None으로 표현한다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessCredentials {
+    /// real, effective, saved-set, filesystem 순서.
+    pub uids: [u32; 4],
+    pub gids: [u32; 4],
+    pub cap_inheritable: u64,
+    pub cap_permitted: u64,
+    pub cap_effective: u64,
+    pub cap_bounding: u64,
+    pub cap_ambient: u64,
 }
 
 /// 프로세스 실행 이벤트 (요건서 4. 프로세스 감시).
@@ -52,6 +98,8 @@ pub struct ProcessEvent {
     pub ppid: Pid,
     /// 실행 권한을 나타내는 유효 UID (/proc status Uid의 두 번째 값).
     pub uid: u32,
+    #[serde(default)]
+    pub credentials: Option<ProcessCredentials>,
     /// /proc/<pid>/stat의 시작 시각(부팅 이후 clock ticks). 미수집/이전 데이터는 None.
     #[serde(default)]
     pub start_time_ticks: Option<u64>,

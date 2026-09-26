@@ -11,7 +11,7 @@ use std::path::Path;
 mod evidence;
 pub use evidence::{EvidenceBundle, EvidencePage, EvidenceQuery, ProcessEventRow};
 mod outbox;
-pub use outbox::{OutboxEntry, OutboxStats};
+pub use outbox::{OutboxEntry, OutboxStats, RetentionJob, RetentionStats};
 mod response_audit;
 pub use response_audit::{ResponseAudit, ResponseAuditRow};
 
@@ -121,6 +121,7 @@ impl EventStore {
             ("start_time_ticks", "INTEGER"),
             ("boot_id", "TEXT"),
             ("exe", "TEXT"),
+            ("event_json", "TEXT"),
         ] {
             let mut stmt = conn.prepare("PRAGMA table_info(process_events)")?;
             let columns = stmt
@@ -213,9 +214,9 @@ impl EventStore {
 
     pub fn insert_process_event(&self, e: &ProcessEvent) -> Result<(), StorageError> {
         self.conn.execute(
-            "INSERT INTO process_events (timestamp_ms, pid, ppid, uid, comm, cmdline, start_time_ticks, boot_id, exe)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![e.timestamp_ms as i64, e.pid, e.ppid, e.uid, e.comm, e.cmdline, e.start_time_ticks, e.boot_id, e.exe],
+            "INSERT INTO process_events (timestamp_ms, pid, ppid, uid, comm, cmdline, start_time_ticks, boot_id, exe, event_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![e.timestamp_ms as i64, e.pid, e.ppid, e.uid, e.comm, e.cmdline, e.start_time_ticks, e.boot_id, e.exe, serde_json::to_string(e)?],
         )?;
         Ok(())
     }
@@ -497,6 +498,7 @@ mod tests {
             action: FileAction::Modify,
             size: Some(123),
             entropy: Some(7.8),
+            content: None,
             process: None,
         }
     }
@@ -563,6 +565,7 @@ mod tests {
                 exe: "/bin/deploy".into(),
                 start_time_ticks: 777,
                 boot_id: "boot-a".into(),
+                ancestors: vec![],
             });
             store.insert_file_event(&event).unwrap();
             assert_eq!(
@@ -637,6 +640,7 @@ mod tests {
                 action: FileAction::Modify,
                 size: Some(10),
                 entropy: Some(7.5),
+                content: None,
                 process: None,
             })
             .unwrap();

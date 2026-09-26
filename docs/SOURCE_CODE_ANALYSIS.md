@@ -161,15 +161,15 @@ Argos AI Security Workspace
 수많은 호스트에 흩어진 Argos 에이전트로부터 등록 신호 및 위험 위협 정보를 비동기 수집하여 모니터링 화면을 표출해 주는 원격 관리 서버입니다.
 
 * **역할 및 책임**:
-  - 에이전트 노드 등록 및 생존 주기 상태 관리 (`/api/v1/agents/register`).
+  - 에이전트 노드 등록(`/api/v1/agents/register`)과 주기적인 생존·보호 상태 관리(`/api/v1/agents/heartbeat`).
   - 탐지 위협 정보 수집 및 다중 조회 API 제공 (`/api/v1/detections`).
-  - 관리 인증을 위한 공유 Bearer 토큰 정책 구현.
+  - 관리자 조회 토큰과 에이전트별 등록·수집 토큰을 분리한 Bearer 인증.
   - 전용 HTML 웹 현황판 화면 배포.
 * **주요 소스 파일**:
   1. **[main.rs](file:///d:/project/ArgosAISecurity/crates/argos-central/src/main.rs)**:
-     - Axum 웹 서비스 진입점. CLI 환경 인자(`--listen`, `--db`, `--token`)를 파싱하여 TCP 포트를 대기합니다.
+     - Axum 웹 서비스 진입점. `--listen`, `--db`, 관리자 토큰(`ARGOS_CENTRAL_TOKEN` 또는 `--token`), 에이전트별 토큰 JSON(`--agent-tokens`)을 읽습니다. 운영 모드에는 서로 다른 관리자·에이전트 토큰이 필요하며, 무인증 개발 모드는 `--development`와 loopback 주소로 제한합니다.
      - 중앙 관제용 로컬 SQLite DB(`central.db`)를 별도로 초기화하고 `agents` 및 `detections` 관계형 테이블을 선언합니다.
-     - `authorize`: 모든 수집/조회 엔드포인트 기동 전 `Authorization` HTTP 헤더 상의 Bearer 공유 비밀 토큰 대조 과정을 적용합니다.
+     - `authorize`: 조회 요청의 관리자 토큰을 검사합니다. `authorize_agent`는 등록·생존 신호·수집 요청의 `agent_id`에 해당하는 전용 토큰을 검사합니다. 대시보드 HTML과 `/healthz`는 공개되지만 실제 데이터 조회에는 관리자 인증이 필요합니다.
      - `register_agent`: 새로운 에이전트의 ID 및 호스트명 등록 신호를 수신해 SQLite에 기입하거나 업데이트합니다.
      - `ingest_detection`: 보고받은 감염 노드의 탐지 정보를 기록하고, 해당 에이전트의 최근 통신 수신 시간(`last_seen_ms`)을 실시간 갱신합니다.
      - `/` 엔드포인트 접근 시 HTML 파일([dashboard.html](file:///d:/project/ArgosAISecurity/crates/argos-central/src/dashboard.html))을 메모리 스트림으로 직접 내려보내 브라우저에 배포합니다.
@@ -296,7 +296,7 @@ Argos AI Security Workspace
 ---
 
 ### 3.10. Ed25519 서명 정책 제어 장치: `argos-policy`
-인가되지 않은 침입자가 에이전트 내부 설정을 개조해 백업 경로를 변조하거나 차단 임계치를 인위적으로 상향시켜 탐지를 회피하는 위협 행동을 원천 차단하는 무결성 검증 유닛입니다.
+서명된 탐지·대응 설정을 검증하고 정책 ID·버전·유효기간·배포 대상·키 ID에 따라 활성화를 제한합니다. 로컬 신뢰 설정과 상태 파일의 OS 접근 권한은 별도 신뢰 경계이며, 해당 파일을 변경할 수 있는 관리자/root를 방어하는 기능은 아닙니다.
 
 * **역할 및 책임**:
   - Ed25519 디지털 키쌍 생산 지원.
@@ -304,10 +304,11 @@ Argos AI Security Workspace
   - 암호 인증을 필한 클린 정책 구조체 역직렬화 반환.
 * **주요 소스 파일**:
   1. **[lib.rs](file:///d:/project/ArgosAISecurity/crates/argos-policy/src/lib.rs)**:
-     - `Policy`: 배포 및 서명 대상인 구조체로 `version` 및 `DetectionConfig`, `ResponseConfig`를 포함하고 있어 에이전트의 행위 매개변수를 교체합니다.
+     - `Policy`: 정책 ID·키 ID·버전·발급/시작/만료 시각·대상 호스트/그룹·선택적 롤백 근거 및 탐지·대응 설정을 서명 대상에 포함합니다.
      - `gen_keypair`: `rand_core::OsRng` 엔트로피 소스를 활용해 안전한 32바이트 Ed25519 비밀키와 대응하는 검증용 공개키를 무작위 생성합니다.
      - `sign_file`: 지정된 비밀키 hex 값을 복원해 입력 정책 파일의 원시 바이트 전체를 서명한 후, 그 결과 서명 해시를 동명의 `.sig` 파일(예: `policy.toml.sig`)에 영구 저장합니다.
-     - `load_verified`: 대상 파일과 `.sig` 서명 내용을 로드해 대조합니다. 검증 실패 시 즉시 `InvalidSignature` 암호학적 신뢰성 거부 에러를 던져 변조 설정의 침투 시도를 봉쇄합니다.
+     - `load_verified`: 같은 바이트를 서명 검증한 뒤 파싱하는 기본 API입니다. 운영 활성화는 `trust.rs`의 `activate_file`을 사용하여 로컬 신뢰 키·정책 메타데이터·영속 버전을 함께 검사합니다.
+     - `activate_file`: 수락 원문·설정·최대 버전과 감사 결과를 같은 SQLite 트랜잭션에 기록합니다. 설정된 정책의 검증 또는 저장 실패 시 에이전트 시작을 중단합니다. 롤백도 더 높은 새 버전과 기존 수락 정책에 대한 승인 근거를 요구합니다. [현재 운영 조건](FEATURE_POLICY.md)을 참고합니다.
 
 ---
 
@@ -404,7 +405,7 @@ objects/ 경로에서 해시 파일 탐색
 ---
 
 ### 4.3. Ed25519 서명 정책 적용 제어 로직
-정책 변조 및 위협 완화 공격을 원천 무력화하기 위한 서명 정책 흐름도입니다.
+서명 정책을 설정한 에이전트의 시작 시 활성화 흐름입니다. 실행 중 유효기간을 벗어나면 수집·탐지는 유지하되 자동 차단을 중단하고 보호 저하를 표시합니다.
 
 ```
 [관리 머신]                                     [서버 에이전트 노드]
@@ -414,15 +415,15 @@ objects/ 경로에서 해시 파일 탐색
 서명키로 서명 서명생성                            policy.toml.sig 정책 서명 파일 탐색
   │                                              │
   ▼                                              ▼
-policy.toml.sig 생성                             argos.toml 내 지정된 공개키(pubkey) 추출
+policy.toml.sig 생성                             로컬 trusted_keys와 서버·그룹 정보 로드
   │                                              │
   ▼                                              ▼
-정책 배포 ──────────────────────────────────────► Ed25519 디지털 서명 대조 검증 수행
+정책 배포 ──────────────────────────────────────► 같은 원문 바이트로 서명·정책 조건 검증
                                                  │
-                                                 ├─► 서명 검증 실패? ──► [경고 로그 출력 및 이전 기본 탐지 정책 강제 유지]
+                                                 ├─► 검증/저장 실패? ──► [시작 중단, 기본 정책으로 전환하지 않음]
                                                  │
                                                  ▼
-                                               서명 검증 성공 시 설정 세팅 동적 교체
+                                               수락 정책·버전·감사 기록 원자적 저장 후 실행
 ```
 
 ---

@@ -6,6 +6,9 @@
 //! - 버전 메타데이터(경로, 해시, 크기, 시각, 원인 pid)는 SQLite 인덱스에 기록.
 //! - 해시 무결성과 운영자의 정상본 판정은 별도 상태다. 자동 백업은 미검토로 저장한다.
 //! - 복구는 명시적으로 정상 판정된 버전만 선택하며, 미검토 버전은 별도 경로에서 미리 본다.
+//! - 사고별 보존 고정은 정상본 판정과 독립적이다. 모든 사고 참조를 승인 해제해야 정리가 가능하다.
+//! - 승인자 기록은 로컬 운영자의 승인 이력이다. 접근 권한은 저장소 파일 권한으로 통제하며,
+//!   원격 사용자 인증이나 호스트 관리자에 대한 변조 방지 저장소를 제공하지 않는다.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -13,6 +16,9 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+mod retention;
+pub use retention::{ReleaseApproval, RetentionAuditEntry, RetentionPin};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecoveryError {
@@ -40,6 +46,10 @@ pub enum RecoveryError {
     IntegrityMismatch { expected: String, actual: String },
     #[error("파일이 백업 크기 제한({limit} bytes)을 초과합니다: {size} bytes")]
     TooLarge { size: u64, limit: u64 },
+    #[error("잘못된 사고 보존 요청: {0}")]
+    InvalidRetention(String),
+    #[error("사고 보존 해제 승인 거부: {0}")]
+    InvalidReleaseApproval(String),
 }
 
 fn io_err(path: &Path, source: std::io::Error) -> RecoveryError {
@@ -126,6 +136,7 @@ impl BackupStore {
         if !columns.iter().any(|c| c == "trust_note") {
             migration.execute_batch("ALTER TABLE versions ADD COLUMN trust_note TEXT;")?;
         }
+        retention::migrate(&migration)?;
         migration.commit()?;
         Ok(Self {
             dir: dir.to_path_buf(),
@@ -359,7 +370,7 @@ impl BackupStore {
         self.version(path, version_id)
     }
 
-    /// 후속 조사에서 정상 판정을 취소한다. 해당 버전은 기본 복구와 보존 보호에서 제외된다.
+    /// 후속 조사에서 정상 판정을 취소한다. 사고 보존 고정은 별도로 유지된다.
     pub fn revoke_known_good(
         &self,
         path: &Path,
@@ -519,7 +530,7 @@ impl BackupStore {
         })
     }
 
-    /// 보존 정책: 모든 정상 복구 지점 + 경로당 최근 `keep`개 미검토 버전을 남긴 뒤,
+    /// 보존 정책: 정상 복구 지점과 사고 보존 고정 버전 + 경로당 최근 `keep`개 미검토 버전을 남긴 뒤,
     /// 어떤 버전도 참조하지 않는 객체 파일을 삭제한다.
     pub fn prune(&self, keep: usize) -> Result<usize, RecoveryError> {
         let transaction = rusqlite::Transaction::new_unchecked(
@@ -527,13 +538,15 @@ impl BackupStore {
             rusqlite::TransactionBehavior::Immediate,
         )?;
         let removed = self.conn.execute(
-            "DELETE FROM versions WHERE known_good = 0 AND id NOT IN (
+            "DELETE FROM versions WHERE known_good = 0 AND NOT EXISTS (
+                 SELECT 1 FROM retention_pins WHERE version_id = versions.id AND released_at_ms IS NULL
+             ) AND id NOT IN (
                  SELECT id FROM (
                      SELECT id, ROW_NUMBER() OVER (PARTITION BY path ORDER BY id DESC) AS rn
                      FROM versions WHERE known_good = 0
                  ) WHERE rn <= ?1
              )",
-            params![keep as i64],
+            params![i64::try_from(keep).unwrap_or(i64::MAX)],
         )?;
 
         // 참조되지 않는 객체 삭제.

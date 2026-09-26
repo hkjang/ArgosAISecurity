@@ -90,7 +90,10 @@ pub struct PolicySimulation {
     pub policy: Policy,
     /// 중복 억제를 적용한 알림 수.
     pub alerts: usize,
-    /// 중복 억제와 무관하게 탐지 점수 이상인 평가 이벤트 수.
+    /// 경로·사용자·계보 집계 알림. 자동 차단 후보에는 포함되지 않는다.
+    pub aggregate_alerts: usize,
+    pub aggregation_evidence_truncated: bool,
+    /// 개별 프로세스 임계치 통과 또는 추가 시간창 알림이 발생한 이벤트 수.
     pub detection_events: usize,
     /// 준비 구간에서 이어진 상태를 고려한 차단 임계치 진입 횟수.
     pub block_threshold_crossings: usize,
@@ -160,13 +163,24 @@ pub fn simulate(
     if baseline.detection.entropy_sample_bytes != candidate.detection.entropy_sample_bytes {
         warnings.push("엔트로피 샘플 크기 변경은 재현할 수 없습니다. 두 정책 모두 수집 당시 저장된 엔트로피만 사용합니다.".into());
     }
-    let warmup_ms = baseline
-        .detection
-        .window_secs
-        .max(candidate.detection.window_secs)
+    let warmup_ms = policy_window_secs(baseline)
+        .max(policy_window_secs(candidate))
         .saturating_mul(1000);
     let warmup_from_ms = options.from_ms.saturating_sub(warmup_ms);
     let range = store.file_events_in_range(warmup_from_ms, options.to_ms, options.max_events)?;
+    if baseline.detection.content_sampling.enabled || candidate.detection.content_sampling.enabled {
+        if range.events.iter().any(|row| row.event.content.is_none()) {
+            warnings.push("일부 과거 이벤트에 다중 위치 표본이 없습니다. 현재 파일로 보완하지 않으며 부분 암호화 비교 근거가 불완전합니다.".into());
+        }
+        if baseline.detection.content_sampling.enabled
+            != candidate.detection.content_sampling.enabled
+            || baseline.detection.content_sampling.total_bytes
+                != candidate.detection.content_sampling.total_bytes
+        {
+            warnings.push("내용 표본 수집 설정이 달라도 저장된 당시 표본만 사용합니다. 새 위치·읽기 예산으로 다시 수집한 결과는 재현할 수 없습니다.".into());
+        }
+    }
+
     if (!baseline.detection.approved_changes.is_empty()
         || !candidate.detection.approved_changes.is_empty())
         && range.events.iter().any(|r| r.event.process.is_none())
@@ -210,6 +224,11 @@ pub fn simulate(
     };
     let baseline_result = replay(&range.events, baseline, options);
     let candidate_result = replay(&range.events, candidate, options);
+    if baseline_result.aggregation_evidence_truncated
+        || candidate_result.aggregation_evidence_truncated
+    {
+        warnings.push("다중 시간창 집계의 메모리 한도로 일부 증거가 제외되었습니다. 집계 결과가 불완전할 수 있습니다.".into());
+    }
     let baseline_threshold: BTreeSet<_> = baseline_result
         .threshold_targets
         .iter()
@@ -267,11 +286,28 @@ pub fn simulate(
     })
 }
 
+fn policy_window_secs(policy: &Policy) -> u64 {
+    let aggregate = &policy.detection.multi_window;
+    let maximum = if aggregate.enabled {
+        aggregate
+            .windows
+            .iter()
+            .map(|window| window.window_secs)
+            .max()
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    policy.detection.window_secs.max(maximum)
+}
+
 fn replay(rows: &[FileEventRow], policy: &Policy, options: &SimulationOptions) -> PolicySimulation {
     let mut engine = DetectionEngine::with_sensor(policy.detection.clone(), options.sensor);
     let mut result = PolicySimulation {
         policy: policy.clone(),
         alerts: 0,
+        aggregate_alerts: 0,
+        aggregation_evidence_truncated: false,
         detection_events: 0,
         block_threshold_crossings: 0,
         unattributed_threshold_events: 0,
@@ -286,6 +322,7 @@ fn replay(rows: &[FileEventRow], policy: &Policy, options: &SimulationOptions) -
             event.entropy = None;
         }
         let evaluation: Evaluation = engine.evaluate(&event);
+        result.aggregation_evidence_truncated |= evaluation.evidence_truncated;
         let key = SimulationTargetKey {
             pid: row.event.pid,
             start_time_ticks: row.event.process.as_ref().map(|p| p.start_time_ticks),
@@ -297,15 +334,21 @@ fn replay(rows: &[FileEventRow], policy: &Policy, options: &SimulationOptions) -
             .is_some_and(|(was_above, previous_ms)| {
                 was_above
                     && row.event.timestamp_ms.saturating_sub(previous_ms)
-                        <= policy.detection.window_secs.saturating_mul(1000)
+                        <= policy_window_secs(policy).saturating_mul(1000)
             });
         if row.event.timestamp_ms < options.from_ms {
             continue;
         }
-        if evaluation.alert.is_some() {
-            result.alerts += 1;
-        }
-        if evaluation.eligible && evaluation.score >= policy.detection.detect_score {
+        result.alerts +=
+            usize::from(evaluation.alert.is_some()) + evaluation.additional_alerts.len();
+        result.aggregate_alerts += evaluation
+            .additional_alerts
+            .iter()
+            .filter(|alert| alert.pid == 0)
+            .count();
+        if (evaluation.eligible && evaluation.score >= policy.detection.detect_score)
+            || !evaluation.additional_alerts.is_empty()
+        {
             result.detection_events += 1;
         }
         if above && !was_above {
@@ -375,11 +418,13 @@ mod tests {
             action: FileAction::Modify,
             size: Some(10),
             entropy,
+            content: None,
             process: Some(argos_common::FileProcessContext {
                 uid: 1000,
                 exe: "/bin/deploy".into(),
                 start_time_ticks: 100,
                 boot_id: "boot-a".into(),
+                ancestors: vec![],
             }),
         }
     }
@@ -391,6 +436,47 @@ mod tests {
             max_events: 1000,
             sensor: SensorKind::Fanotify,
         }
+    }
+
+    #[test]
+    fn aggregate_replay_warms_long_windows_without_inventing_block_targets() {
+        with_store("aggregate-warmup", |store| {
+            for (n, ts) in [100_000, 200_000, 300_000, 450_000].into_iter().enumerate() {
+                store
+                    .insert_file_event(&event(ts, 100 + n as u32, n, Some(7.9)))
+                    .unwrap();
+            }
+            let baseline = Policy::default();
+            let mut candidate = baseline.clone();
+            candidate.response.auto_block = true;
+            candidate.detection.multi_window.enabled = true;
+            candidate.detection.multi_window.protected_paths =
+                vec!["/nonexistent/argos-replay".into()];
+            candidate.detection.multi_window.windows =
+                vec![argos_common::config::DetectionWindow {
+                    window_secs: 600,
+                    min_changed_files: 4,
+                    mass_change_threshold: 4,
+                    detect_score: 90.0,
+                }];
+            let report = simulate(
+                store,
+                &baseline,
+                &candidate,
+                &SimulationOptions {
+                    from_ms: 400_000,
+                    to_ms: 500_000,
+                    ..options()
+                },
+            )
+            .unwrap();
+            assert_eq!(report.coverage.warmup_from_ms, 0);
+            assert_eq!(report.coverage.warmup_events, 3);
+            assert_eq!(report.baseline.alerts, 0);
+            assert!(report.candidate.aggregate_alerts > 0);
+            assert!(report.candidate.would_block_pids.is_empty());
+            assert!(report.candidate.threshold_targets.is_empty());
+        });
     }
 
     #[test]

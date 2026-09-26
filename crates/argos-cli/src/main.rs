@@ -3,6 +3,7 @@
 //! 구현: status, events, threats, scan, doctor, restore, explain.
 //! isolate/policy/update는 Phase 3+에서 채워진다.
 
+mod evidence_package;
 mod investigation;
 mod reports;
 
@@ -74,6 +75,11 @@ enum Command {
         #[arg(long)]
         recommend: bool,
     },
+    /// 사건별 복구 지점 보존·해제·감사
+    Retention {
+        #[command(subcommand)]
+        action: RetentionAction,
+    },
     /// 최근 프로세스 실행 이력 조회 (Linux 프로세스 감시)
     Processes {
         #[arg(short = 'n', long, default_value_t = 20)]
@@ -103,6 +109,21 @@ enum Command {
     },
     /// 로컬 호스트 근거만 조회하는 MCP stdio 서버
     Mcp,
+    /// 사건 근거·수락 정책·대응 이력을 해시 manifest와 함께 새 디렉터리로 내보내기
+    EvidenceExport {
+        id: i64,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 300)]
+        window_secs: u64,
+        #[arg(long, default_value_t = 1000)]
+        limit: usize,
+        /// 경로·명령행 등 민감 문자열 포함 (기본 제외)
+        #[arg(long)]
+        include_sensitive: bool,
+    },
+    /// 내보낸 증거 파일의 해시·크기 검증 (발급자 서명 검증과는 별개)
+    EvidenceVerify { path: PathBuf },
     /// 경로별 정상 복구 지점, 누락, 마지막 복구 시험 결과
     RecoveryStatus {
         /// 정상본을 별도 임시 파일에 복구하고 검증 (원본 유지)
@@ -149,7 +170,51 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum RetentionAction {
+    /// 특정 버전을 사건 증거로 보존 (정상본 지정과 별개)
+    Pin {
+        path: PathBuf,
+        #[arg(long)]
+        version: i64,
+        #[arg(long)]
+        incident: String,
+        #[arg(long)]
+        actor: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// 활성 보존 참조 조회
+    List {
+        #[arg(long)]
+        incident: Option<String>,
+        #[arg(long)]
+        include_released: bool,
+    },
+    /// 별도 승인 이력으로 사건의 보존 해제
+    Release {
+        #[arg(long)]
+        incident: String,
+        #[arg(long)]
+        approval: String,
+        #[arg(long)]
+        approver: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// 보존/해제 감사 이력
+    Audit {
+        #[arg(long)]
+        incident: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum PolicyAction {
+    /// 영구 저장된 적용 버전·최고 버전과 감사 이력 (읽기 전용)
+    Status {
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
     /// 현재 적용 정책과 서명 검증 상태 표시
     Show,
     /// Ed25519 키쌍 생성 (서명키는 안전한 곳에 보관)
@@ -216,6 +281,7 @@ fn main() {
             version,
             recommend,
         ),
+        Command::Retention { action } => cmd_retention(&config, action),
         Command::Processes { limit } => cmd_processes(&config, limit),
         Command::Ask {
             question,
@@ -242,6 +308,14 @@ fn main() {
             Ok(())
         })(),
         Command::Mcp => (|| investigation::serve_mcp(&open_store(&config)?))(),
+        Command::EvidenceExport {
+            id,
+            out,
+            window_secs,
+            limit,
+            include_sensitive,
+        } => evidence_package::export(&config, id, &out, window_secs, limit, include_sensitive),
+        Command::EvidenceVerify { path } => evidence_package::verify(&path),
         Command::RecoveryStatus {
             test,
             before_ms,
@@ -399,11 +473,27 @@ fn cmd_explain(config: &AgentConfig, id: i64) -> CmdResult {
     };
 
     let timestamp = u64::try_from(detection.timestamp_ms)?;
-    let window = config
+    let detection_config = if config.policy.is_enabled() {
+        argos_policy::load_active_policy(&argos_policy::policy_state_path(
+            &config.policy,
+            &config.db_path,
+        ))?
         .detection
-        .window_secs
-        .checked_mul(1000)
-        .ok_or("탐지 시간 범위 초과")?;
+    } else {
+        config.detection.clone()
+    };
+    let seconds = if detection.rule.starts_with("behavior.multi_window.") {
+        detection_config
+            .multi_window
+            .windows
+            .iter()
+            .map(|w| w.window_secs)
+            .max()
+            .unwrap_or(detection_config.window_secs)
+    } else {
+        detection_config.window_secs
+    };
+    let window = seconds.checked_mul(1000).ok_or("탐지 시간 범위 초과")?;
     cmd_ask(config, &format!("탐지 ID {}의 원인·영향·오탐 가능성·대응 결과를 근거 ID와 함께 설명해 주세요. 탐지 메타데이터: {}", id, serde_json::to_string(&detection)?), Some(timestamp.saturating_sub(window)), Some(timestamp.saturating_add(5000).min(i64::MAX as u64)), None)
 }
 
@@ -745,8 +835,54 @@ fn cmd_isolate(release: bool, allow: &[String], dry_run: bool) -> CmdResult {
     Ok(())
 }
 
+fn cmd_retention(config: &AgentConfig, action: RetentionAction) -> CmdResult {
+    let store = BackupStore::open(&config.backup.dir, config.backup.max_file_bytes)?;
+    let value = match action {
+        RetentionAction::Pin {
+            path,
+            version,
+            incident,
+            actor,
+            reason,
+        } => {
+            let path = path.canonicalize().unwrap_or(path);
+            serde_json::to_value(store.pin_version(&path, version, &incident, &actor, &reason)?)?
+        }
+        RetentionAction::List {
+            incident,
+            include_released,
+        } => serde_json::to_value(store.retention_pins(incident.as_deref(), include_released)?)?,
+        RetentionAction::Release {
+            incident,
+            approval,
+            approver,
+            reason,
+        } => serde_json::to_value(store.release_incident(
+            &incident,
+            &argos_recovery::ReleaseApproval {
+                approval_id: approval,
+                approver,
+                reason,
+            },
+        )?)?,
+        RetentionAction::Audit { incident } => {
+            serde_json::to_value(store.retention_audit(incident.as_deref())?)?
+        }
+    };
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
 fn cmd_policy(config: &AgentConfig, action: PolicyAction) -> CmdResult {
     match action {
+        PolicyAction::Status { limit } => {
+            let state = argos_policy::read_state(
+                &argos_policy::policy_state_path(&config.policy, &config.db_path),
+                limit,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&state)?);
+            Ok(())
+        }
         PolicyAction::Simulate {
             candidate,
             from_ms,
@@ -754,12 +890,16 @@ fn cmd_policy(config: &AgentConfig, action: PolicyAction) -> CmdResult {
             max_events,
         } => {
             let baseline = if config.policy.is_enabled() {
-                argos_policy::load_verified(&config.policy.path, &config.policy.pubkey)?
+                argos_policy::load_active_policy(&argos_policy::policy_state_path(
+                    &config.policy,
+                    &config.db_path,
+                ))?
             } else {
                 argos_policy::Policy {
                     version: 0,
                     detection: config.detection.clone(),
                     response: config.response.clone(),
+                    ..Default::default()
                 }
             };
             // 후보는 아직 서명 전일 수 있다. 재생만 허용하며 활성화 경로로 전달하지 않는다.
@@ -779,7 +919,7 @@ fn cmd_policy(config: &AgentConfig, action: PolicyAction) -> CmdResult {
         PolicyAction::GenKey => {
             let (secret, public) = argos_policy::gen_keypair();
             println!("서명키(비밀, 관리 머신에만 보관):\n{secret}\n");
-            println!("검증키(공개, argos.toml [policy] pubkey에 설정):\n{public}");
+            println!("검증키(공개, argos.toml [policy.trusted_keys]의 키 ID에 설정):\n{public}");
             Ok(())
         }
         PolicyAction::Sign { policy, key_file } => {
@@ -790,40 +930,29 @@ fn cmd_policy(config: &AgentConfig, action: PolicyAction) -> CmdResult {
         }
         PolicyAction::Verify => {
             if !config.policy.is_enabled() {
-                return Err("argos.toml에 [policy] path/pubkey가 설정되어 있지 않습니다.".into());
+                return Err("argos.toml에 [policy] path가 설정되어 있지 않습니다.".into());
             }
-            argos_policy::verify_file(&config.policy.path, &config.policy.pubkey)?;
-            println!("서명 검증 성공: {}", config.policy.path.display());
+            if config.policy.trusted_keys.is_empty() {
+                argos_policy::verify_file(&config.policy.path, &config.policy.pubkey)?;
+                println!(
+                    "서명 검증 성공: {} (서명만 검증; 운영 활성화에는 신뢰 키/메타데이터 필요)",
+                    config.policy.path.display()
+                );
+            } else {
+                argos_policy::load_trusted(&config.policy, config.sensor)?;
+                println!("서명·유효기간·대상·설정 검증 성공. 영구 버전 검사/적용은 에이전트 시작 시 실행됩니다.");
+            }
             Ok(())
         }
         PolicyAction::Show => {
-            if !config.policy.is_enabled() {
-                println!(
-                    "서명 정책 미사용 — argos.toml의 [detection]/[response]가 그대로 적용됩니다."
-                );
+            if config.policy.is_enabled() {
+                let path = argos_policy::policy_state_path(&config.policy, &config.db_path);
+                let policy = argos_policy::load_active_policy(&path)?;
+                println!("{}", serde_json::to_string_pretty(&policy)?);
             } else {
-                match argos_policy::load_verified(&config.policy.path, &config.policy.pubkey) {
-                    Ok(p) => {
-                        println!(
-                            "정책 파일   : {} (서명 검증 OK)",
-                            config.policy.path.display()
-                        );
-                        println!("정책 버전   : {}", p.version);
-                        println!("탐지 설정   : {:?}", p.detection);
-                        println!("대응 설정   : {:?}", p.response);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        println!(
-                            "정책 파일   : {} — 검증 실패: {e}",
-                            config.policy.path.display()
-                        );
-                        println!("(에이전트는 이 정책을 적용하지 않습니다)");
-                    }
-                }
+                println!("서명 정책 미사용 — 로컬 설정 (서명 검증 없음)");
+                println!("{}", serde_json::to_string_pretty(&config.detection)?);
             }
-            println!("\n[현재 유효 탐지 설정]\n{:?}", config.detection);
-            println!("\n[현재 유효 대응 설정]\n{:?}", config.response);
             Ok(())
         }
     }

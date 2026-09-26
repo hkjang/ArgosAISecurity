@@ -4,8 +4,8 @@
 //! 1. 관리 머신에서 `argos policy gen-key` → 서명키(비밀)·검증키(공개) 생성
 //! 2. 정책 파일(policy.toml) 작성 후 `argos policy sign --key-file <서명키>`
 //!    → `policy.toml.sig` 생성
-//! 3. 에이전트는 argos.toml의 `[policy] pubkey`로 서명을 검증하고,
-//!    검증 실패 시 정책을 **적용하지 않는다**.
+//! 3. 에이전트는 로컬 `[policy.trusted_keys]`로 서명과 배포 메타데이터를 검증한다.
+//!    영속 버전·감사 기록을 함께 커밋하며, 실패 시 시작을 중단한다.
 //!
 //! 서명 대상은 정책 파일의 바이트 그대로다 — 정규화 과정이 없어 단순하고,
 //! 파일이 1바이트라도 바뀌면 검증이 실패한다.
@@ -14,6 +14,12 @@ use argos_common::config::{DetectionConfig, ResponseConfig};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+mod trust;
+pub use trust::{
+    activate_file, load_active_policy, load_trusted, policy_state_path, read_state,
+    ActivatedPolicy, ActivationError, PolicyAudit, PolicyStateSnapshot, PolicyStatus,
+};
 
 mod simulation;
 pub use simulation::{
@@ -50,8 +56,17 @@ fn io_err(path: &Path, source: std::io::Error) -> PolicyError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Policy {
-    /// 정책 버전 — 롤백·감사 추적용 (요건서 13장).
+    /// 정책 버전 — 운영 활성화에서는 영속 최대 버전보다 증가해야 한다.
     pub version: u64,
+    /// 활성화 시 필수인 서명된 신뢰 메타데이터 (시뮬레이션/단순 서명은 생략 가능).
+    pub policy_id: String,
+    pub key_id: String,
+    pub issued_at_ms: u64,
+    pub not_before_ms: u64,
+    pub expires_at_ms: u64,
+    pub target_hosts: Vec<String>,
+    pub target_groups: Vec<String>,
+    pub rollback: Option<RollbackApproval>,
     pub detection: DetectionConfig,
     pub response: ResponseConfig,
 }
@@ -60,10 +75,28 @@ impl Default for Policy {
     fn default() -> Self {
         Self {
             version: 0,
+            policy_id: String::new(),
+            key_id: String::new(),
+            issued_at_ms: 0,
+            not_before_ms: 0,
+            expires_at_ms: 0,
+            target_hosts: Vec::new(),
+            target_groups: Vec::new(),
+            rollback: None,
             detection: DetectionConfig::default(),
             response: ResponseConfig::default(),
         }
     }
+}
+
+/// 이전 설정 복구도 새 버전으로 서명해야 하며, 로컬 승인 이력을 참조한다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RollbackApproval {
+    pub source_version: u64,
+    pub source_sha256: String,
+    pub approval_id: String,
+    pub reason: String,
 }
 
 /// 새 키쌍 생성. 반환: (서명키 hex 64자, 검증키 hex 64자).

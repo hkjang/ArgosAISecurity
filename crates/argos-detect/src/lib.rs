@@ -3,9 +3,10 @@
 //! 요건서 8장: 행위 기반 탐지 우선, 점수 기반 룰, 1초 이내 1차 판단.
 
 pub mod entropy;
+mod multi_window;
 pub mod scorer;
 
-pub use entropy::{file_entropy, shannon_entropy};
+pub use entropy::{file_entropy, shannon_entropy, ContentSampler};
 pub use scorer::{BehaviorScorer, Evaluation};
 
 use argos_common::{
@@ -27,6 +28,7 @@ pub struct DetectionEngine {
     scorer: BehaviorScorer,
     config: DetectionConfig,
     last_canary_emit: HashMap<CanaryIdentity, u64>,
+    multi_window: multi_window::MultiWindowScorer,
 }
 
 impl DetectionEngine {
@@ -37,6 +39,7 @@ impl DetectionEngine {
     pub fn with_sensor(config: DetectionConfig, sensor: SensorKind) -> Self {
         Self {
             scorer: BehaviorScorer::with_sensor(config.clone(), sensor),
+            multi_window: multi_window::MultiWindowScorer::new(config.clone(), sensor),
             config,
             last_canary_emit: HashMap::new(),
         }
@@ -54,7 +57,7 @@ impl DetectionEngine {
             .approved_changes
             .iter()
             .find(|change| approved_event(change, event))
-            .map(|change| change.id.clone());
+            .cloned();
         let mut assessment = if self.is_excluded(&event.path) {
             Evaluation {
                 score: 0.0,
@@ -62,9 +65,36 @@ impl DetectionEngine {
                 eligible: false,
                 alert: None,
                 approved_change_id: None,
+                additional_alerts: Vec::new(),
+                evidence_truncated: false,
             }
         } else {
-            self.scorer.evaluate_with_approval(event, approval)
+            let legacy = approval
+                .as_ref()
+                .filter(|change| {
+                    change
+                        .adjusted_rules
+                        .iter()
+                        .any(|rule| rule == BEHAVIOR_RULE)
+                })
+                .map(|change| change.id.clone());
+            let mut assessment = self.scorer.evaluate_with_approval(event, legacy);
+            let multi = self.multi_window.evaluate(
+                event,
+                approval
+                    .as_ref()
+                    .map_or(&[], |change| change.adjusted_rules.as_slice()),
+            );
+            if let Some(score) = multi.instance_score {
+                assessment.score = assessment.score.max(score);
+                assessment.eligible = true;
+            }
+            if multi.approval_applied {
+                assessment.approved_change_id = approval.as_ref().map(|change| change.id.clone());
+            }
+            assessment.additional_alerts = multi.alerts;
+            assessment.evidence_truncated |= multi.truncated;
+            assessment
         };
         if matches!(
             event.action,
@@ -82,6 +112,7 @@ impl DetectionEngine {
                 event
                     .process
                     .as_ref()
+                    .filter(|p| p.boot_id.len() <= 128)
                     .map(|p| (p.start_time_ticks, p.boot_id.clone())),
                 event.path.clone(),
             );
@@ -90,6 +121,20 @@ impl DetectionEngine {
                     < self.config.window_secs.saturating_mul(1000)
             });
             if !cooldown && assessment.score >= self.config.detect_score {
+                if !self.last_canary_emit.contains_key(&identity)
+                    && self.last_canary_emit.len()
+                        >= self.config.multi_window.max_groups.clamp(1, 16_384)
+                {
+                    if let Some(oldest) = self
+                        .last_canary_emit
+                        .iter()
+                        .min_by_key(|(key, timestamp)| (**timestamp, *key))
+                        .map(|(key, _)| key.clone())
+                    {
+                        self.last_canary_emit.remove(&oldest);
+                    }
+                    assessment.evidence_truncated = true;
+                }
                 self.last_canary_emit.insert(identity, event.timestamp_ms);
                 assessment.alert = Some(Detection {
                     timestamp_ms: event.timestamp_ms,
@@ -136,10 +181,6 @@ fn approved_event(change: &ApprovedChange, event: &FileEvent) -> bool {
             .paths
             .iter()
             .any(|path| Path::new(&event.path).starts_with(path))
-        && change
-            .adjusted_rules
-            .iter()
-            .any(|rule| rule == BEHAVIOR_RULE)
 }
 
 /// 시작 시 및 정책 재생 전에 잘못된 설정과 센서별 대응 제약을 확인한다.
@@ -169,10 +210,55 @@ pub fn validate_configuration(
             || change
                 .adjusted_rules
                 .iter()
-                .any(|rule| rule != BEHAVIOR_RULE)
+                .any(|rule| rule != BEHAVIOR_RULE && !multi_window::RULES.contains(&rule.as_str()))
         {
-            errors.push("승인 작업은 behavior.ransomware_pattern 룰만 조정할 수 있습니다");
+            errors.push("승인 작업은 지원하는 행위·다중 시간창 룰만 조정할 수 있습니다");
         }
+    }
+    let multi = &detection.multi_window;
+    if multi.max_events == 0
+        || multi.max_events > 100_000
+        || multi.max_groups == 0
+        || multi.max_groups > 16_384
+        || !(64..=4096).contains(&multi.max_path_bytes)
+    {
+        errors.push("탐지 메모리 한도는 events 1~100000, groups 1~16384, path bytes 64~4096 범위여야 합니다");
+    }
+    if multi.enabled {
+        let mut windows = HashSet::new();
+        if multi.windows.is_empty()
+            || multi.windows.len() > 8
+            || multi.windows.iter().any(|window| {
+                window.window_secs == 0
+                    || window.window_secs > 86400
+                    || !windows.insert(window.window_secs)
+                    || window.min_changed_files == 0
+                    || window.mass_change_threshold == 0
+                    || !window.detect_score.is_finite()
+                    || !(0.0..=100.0).contains(&window.detect_score)
+            })
+        {
+            errors.push("다중 시간창은 중복 없는 1~86400초의 최대 8개 창과 양의 파일 수·유효 점수가 필요합니다");
+        }
+        if multi.protected_paths.len() > 128
+            || multi.protected_paths.iter().any(|path| {
+                !absolute_clean_path(path) || path.as_os_str().len() > multi.max_path_bytes
+            })
+        {
+            errors.push("집계 보호 경로는 최대 128개의 길이 제한 내 절대 경로여야 합니다");
+        }
+    }
+    let sampling = &detection.content_sampling;
+    if sampling.enabled
+        && (!(3..=entropy::MAX_SAMPLE_BYTES).contains(&sampling.total_bytes)
+            || sampling.max_files == 0
+            || sampling.max_files > 65_536
+            || sampling.history_secs == 0
+            || sampling.history_secs > 86400
+            || !sampling.min_entropy_increase.is_finite()
+            || !(0.0..=8.0).contains(&sampling.min_entropy_increase))
+    {
+        errors.push("내용 관찰은 총 3바이트~1MiB, 1~65536개 이력, 1~86400초와 0~8의 엔트로피 증가 기준이 필요합니다");
     }
     if detection
         .canary_paths
@@ -203,13 +289,29 @@ pub fn validate_configuration(
     }
 
     let mut warnings = Vec::new();
-    let mut max_score: f64 = match (sensor, detection.entropy_sample_bytes == 0) {
+    let bytes = if detection.content_sampling.enabled {
+        detection.content_sampling.total_bytes
+    } else {
+        detection.entropy_sample_bytes
+    }
+    .min(entropy::MAX_SAMPLE_BYTES);
+    let entropy_possible =
+        bytes > 0 && (bytes as f64).log2().min(8.0) >= detection.entropy_threshold;
+    let base_max_score: f64 = match (sensor, !entropy_possible) {
         (SensorKind::Fanotify, true) => 40.0,
         (SensorKind::Notify, true) => 65.0,
         _ => 100.0,
     };
+    let mut max_score = base_max_score;
     if !detection.canary_paths.is_empty() {
         max_score = max_score.max(95.0);
+    }
+    if detection.multi_window.enabled {
+        for window in &detection.multi_window.windows {
+            if window.detect_score > base_max_score {
+                warnings.push(format!("{}초 시간창의 임계치 {}가 센서·표본 예산의 최대 점수 {base_max_score}보다 높습니다", window.window_secs, window.detect_score));
+            }
+        }
     }
     for (name, threshold) in [
         ("detection.detect_score", detection.detect_score),
@@ -262,7 +364,9 @@ mod tests {
                 exe: "/usr/local/bin/deploy".into(),
                 start_time_ticks: 100,
                 boot_id: "boot-a".into(),
+                ancestors: Vec::new(),
             }),
+            content: None,
         }
     }
 
@@ -443,6 +547,7 @@ mod tests {
             entropy: Some(7.9),
             size: None,
             process: None,
+            content: None,
         };
         let excluded = engine.evaluate(&e);
         assert!(!excluded.eligible);
@@ -511,5 +616,30 @@ mod tests {
         ] {
             assert!(error.contains(expected), "누락된 검증: {expected}");
         }
+    }
+
+    #[test]
+    fn validates_opt_in_window_and_sampling_bounds() {
+        let response = ResponseConfig::default();
+        let mut config = DetectionConfig::default();
+        config.multi_window.enabled = true;
+        config.content_sampling.enabled = true;
+        assert!(validate_configuration(&config, &response, SensorKind::Fanotify).is_ok());
+        config
+            .multi_window
+            .windows
+            .push(config.multi_window.windows[0].clone());
+        assert!(validate_configuration(&config, &response, SensorKind::Fanotify).is_err());
+        config.multi_window.windows.pop();
+        config.content_sampling.total_bytes = entropy::MAX_SAMPLE_BYTES + 1;
+        assert!(validate_configuration(&config, &response, SensorKind::Fanotify).is_err());
+        config.content_sampling.total_bytes = 128;
+        let warnings = validate_configuration(&config, &response, SensorKind::Fanotify).unwrap();
+        assert!(warnings
+            .iter()
+            .any(|message| message.contains("response.block_score")));
+        assert!(warnings.iter().any(|message| message.contains("시간창")));
+        config.multi_window.max_events = 0;
+        assert!(validate_configuration(&config, &response, SensorKind::Fanotify).is_err());
     }
 }

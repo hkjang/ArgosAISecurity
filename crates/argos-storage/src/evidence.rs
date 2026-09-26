@@ -88,9 +88,21 @@ impl EventStore {
             &tx,
             "process_events",
             "id, timestamp_ms, pid, ppid, uid, comm, cmdline",
-            &["start_time_ticks", "boot_id", "exe"],
+            &["start_time_ticks", "boot_id", "exe", "event_json"],
         )?;
         let processes = query_page(&tx, "process_events", &process_columns, query, |r| {
+            if let Some(json) = r.get::<_, Option<String>>(10)? {
+                return Ok(ProcessEventRow {
+                    id: r.get(0)?,
+                    event: serde_json::from_str(&json).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            10,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?,
+                });
+            }
             Ok(ProcessEventRow {
                 id: r.get(0)?,
                 event: ProcessEvent {
@@ -98,6 +110,7 @@ impl EventStore {
                     pid: r.get(2)?,
                     ppid: r.get(3)?,
                     uid: r.get(4)?,
+                    credentials: None,
                     comm: r.get(5)?,
                     cmdline: r.get(6)?,
                     start_time_ticks: r.get(7)?,
@@ -196,6 +209,7 @@ mod tests {
                     action: FileAction::Modify,
                     size: None,
                     entropy: Some(7.5),
+                    content: None,
                     process: None,
                 })
                 .unwrap();
@@ -216,6 +230,7 @@ mod tests {
                     pid,
                     ppid: 1,
                     uid: 1000,
+                    credentials: None,
                     comm: "test".into(),
                     cmdline: "test --file".into(),
                     start_time_ticks: Some(123),

@@ -26,24 +26,25 @@
    ```
 2. 출력되는 키 항목을 격리 수집합니다:
    - **서명키 (비밀키)**: 외부 노출이 완전히 금지되는 32바이트(hex 64자) 키입니다. 관리자 전용 금고 머신에 텍스트 파일(예: `signing.key`)로 영구 저장합니다.
-   - **검증키 (공개키)**: 각 서버 에이전트의 `argos.toml` 파일 내부 `[policy] pubkey` 파라미터에 사전 입력 배포할 키입니다.
+   - **검증키 (공개키)**: 각 서버의 `argos.toml`에 키 ID와 함께 `[policy.trusted_keys]`로 배포합니다. 이전 `policy.pubkey`만 있는 설정은 CLI의 서명 확인용이며 운영 활성화에는 사용할 수 없습니다.
+
+서버의 로컬 신뢰 설정 예시입니다. 공개키와 서버·그룹 ID를 실제 배포 대상에 맞게 지정합니다.
+
+```toml
+[policy]
+path = "/etc/argos/policy.toml"
+policy_id = "production"
+host_id = "agent-db-01"
+groups = ["database"]
+
+[policy.trusted_keys]
+release-2026 = "<Ed25519 공개키 hex 64자>"
+```
 
 ### 2.2. 정책 구성서 (`policy.toml`) 작성
-서명 및 배포할 신규 설정 데이터의 가중치를 튜닝해 파일을 작성합니다:
-```toml
-version = 1                  # 감사용 버전 번호
-[detection]
-window_secs = 10             # 슬라이딩 윈도우 시간 (10초)
-mass_change_threshold = 30   # 대량 쓰기 판단 기준 파일 수 (30개)
-min_changed_files = 5        # 최소 탐지 유발 파일 수 (5개)
-entropy_threshold = 7.2      # 암호화 의심 Shannon 엔트로피 (7.2)
-detect_score = 40.0          # 탐지 생성 하한 점수 (40점)
-entropy_sample_bytes = 65536 # 엔트로피 실측 샘플 크기 (64KB)
+[정책 신뢰 문서의 전체 정책 예제](FEATURE_POLICY.md#서명과-활성화)를 사용합니다. 탐지·대응 설정 외에 정책 ID, 키 ID, 버전, 발급·시작·만료 시각, 대상 호스트 또는 그룹이 필요합니다. 예제의 시각은 형식 안내이므로 실제 배포 기간으로 바꿉니다. 호스트와 그룹을 모두 지정하면 두 조건이 모두 일치해야 합니다.
 
-[response]
-auto_block = false           # 관찰·정책 재생 후 소수 서버에서 자동 차단 검증
-block_score = 80.0           # 자동 차단 발동 점수 (80점)
-```
+`version`은 마지막 수락 버전보다 높게 지정하며, 같은 버전·같은 바이트만 재시작 복원으로 허용합니다. `auto_block=false`로 관찰·정책 재생을 확인한 뒤 소수 서버에서 자동 차단을 검증합니다. 서명이 유효해도 기간·대상·키·버전이나 설정이 잘못되면 시작을 거부합니다. 검증 실패 시 로컬 기본 정책으로 전환하지 않습니다.
 
 ### 2.3. 정책 날인 서명 실행
 비밀 서명키가 들어 있는 경로를 활용해 `policy.toml` 파일에 암호 증명을 날인합니다:
@@ -52,6 +53,7 @@ argos policy sign policy.toml --key-file signing.key
 ```
 - 실행 완료 시, 타겟 경로 하위에 정형 서명 파일인 `policy.toml.sig`가 즉시 생성됩니다.
 - 정책 배포 시 원본 `policy.toml`과 함께 `policy.toml.sig` 파일이 타겟 에이전트 서버의 지정 디렉터리에 반드시 동시 안착되어야 합니다.
+- `argos --config argos.toml policy verify`는 읽기 전용 검증입니다. 영속 버전 검사와 활성화는 에이전트 시작 시 실행하며, `policy status`에서 수락 결과를 확인합니다. 이전 설정 이전·키 교체·새 버전으로 승인된 롤백·전용 상태 경로 권한은 [정책 신뢰 문서](FEATURE_POLICY.md)를 따릅니다.
 
 ---
 

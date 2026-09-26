@@ -1,6 +1,6 @@
 # 검증 가능한 보안 플랫폼: 구현과 검증 기록
 
-기준: `f0135ef`의 로컬 작업 트리에서 개선. 검증일: 2026-09-26. 자동 차단 기본값은 계속 비활성이다.
+기준: `v0.2.0`과 이전 릴리즈 검증 기록. v0.2.0 릴리즈 검증일: 2026-09-27, v0.1.0 검증일: 2026-09-26. 자동 차단 기본값은 계속 비활성이다.
 
 ## 구현 범위
 
@@ -14,7 +14,7 @@
 | 인증/격리 | 운영 관리자/개별 에이전트 토큰 필수, loopback 개발 모드, 비밀값 마스킹, 명시적 관리 IP·방향·포트만 허용, IPv4/IPv6 INPUT/OUTPUT/FORWARD 제한 |
 | 조사 | 기간·PID 기반 근거 조회, 조회 누락·근거 ID, Anthropic/Ollama 설정, 조회형 MCP, 시간순 재생 HTML, 복구 준비도 HTML |
 
-## 실행 결과
+## 기존 v0.1.0 실행 결과
 
 - `cargo test --workspace`: **96개 단위/회귀 테스트 통과**.
 - `cargo build --workspace`: 성공.
@@ -27,6 +27,20 @@
 - 복구 시험: 기존 소유권 유지, `06755 → 0755`, 신규 파일 `0600`, 원본 심볼릭 링크 거부.
 - `git diff --check`, 변경 Rust 파일 포맷, 보고서 JavaScript 문법 검사 통과.
 
+## 정책 신뢰·Linux 분석 확장 검증
+
+- `cargo test --workspace --offline --locked`: **144개 단위/회귀 테스트 통과**. `cargo build --release --workspace --offline --locked` 성공.
+- v0.2.0 배포용 최적화 바이너리로 `scripts/smoke-test.sh`, `scripts/platform-smoke.py`, `scripts/security-scenarios.py`를 실행해 모두 통과했다. `argos --version`은 `argos 0.2.0`이며 패키지의 최대 요구 glibc 버전은 2.39다.
+- 정책: 동일 바이트 검증·파싱, 버전 재사용·다운그레이드·기간·대상·키 ID 거부, 승인된 새 버전 롤백, 재시작·동시 적용·감사 기록 실패 시 원자성 검증. 실행 중 기간 이탈은 대응 직전 재검사하고 자동 차단을 중단한다.
+- 탐지: 10/60/600초 시간창, 분산 PID·유효 계정·부모 계보·보호 경로 집계, PID 재사용·규칙별 예외·근거 상한, 중간/끝 부분 변조와 ZIP 기준·실제 읽기 예산 검증. 합산 경보만으로 개별 PID를 차단하지 않는다.
+- Linux 설정: 주석·공백/키 설명과 실제 SSH·sudoers·cron·systemd 변경 분리, 인용 옵션·지시문 순서·중복 보존, 초기 읽기 실패의 보호 상태 표시. 실제 `/proc`의 같은 PID 실행 변경과 UID/GID·capability 근거 확인.
+- 복구: 독립 사건 참조·정상 판정 취소·`prune(0)`·동시 고정/정리·재시작·승인 재사용 거부. 백업 DB 쓰기 잠금 중에도 탐지 기록이 2초 이내 완료되며, 보존 요청은 별도 스레드에서 대기한 뒤 재시작 후 중복 없이 완료된다. 이는 테스트 환경의 제한된 잠금 시험이며 운영 지연 보장이 아니다.
+- 보존 요청은 탐지와 같은 트랜잭션에 저장하며 10,000건 상한 초과에서도 탐지를 유지하고 누락을 영속 계수한다. 재시도·ACK 중복·상태 보존을 검증했다.
+- 증거 패키지: 숫자 근거 ID 유지, 명령행/경로/문자열 ID 마스킹, 개별 SHA-256·파일 목록 검증, 변조·추가 파일·기존 출력 덮어쓰기 거부.
+- `scripts/security-scenarios.py`: 실제 CLI/에이전트의 정상/의미 변경, 자동 사건 보존, 같은 PID exec·자격 정보, 승인 해제, 증거 패키지, 분산 정책 재생, 영속 정책 신뢰 등 **8개 시나리오 통과**. 예상 결과와 실제 결과를 JSON으로 저장한다.
+
+외부 승인자 인증, 완전한 Linux 유효 설정 평가, 사건 당시 실제 실행 정책 증명, 실행 파일 해시/패키지 신뢰, 서비스 영향 및 CPU/디스크 기반 자동 축소는 이 구현의 완료 범위가 아니다. 서명 정책 상태와 백업 저장소는 로컬 관리자/root에 대한 별도 외부 보존 경계를 제공하지 않는다.
+
 ## 재현
 
 ```bash
@@ -34,6 +48,7 @@ cargo test --workspace
 cargo build --workspace
 sh scripts/smoke-test.sh
 python3 scripts/platform-smoke.py --bin-dir target/debug
+python3 scripts/security-scenarios.py --bin-dir target/debug --report /tmp/argos-scenarios.json
 python3 scripts/test-isolation-netns.py --argos target/debug/argos
 ```
 

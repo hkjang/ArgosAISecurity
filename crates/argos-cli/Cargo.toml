@@ -19,3 +19,5 @@ argos-response.workspace = true
 clap.workspace = true
 toml.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+libc.workspace = true

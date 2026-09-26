@@ -100,7 +100,7 @@ docker run --rm -v ${PWD}:/src -v argos-cargo-cache:/usr/local/cargo/registry -v
 ## 랜섬웨어 탐지·대응 동작
 
 1. 센서가 감시 경로의 파일 이벤트 수집 — `notify`(기본) 또는 `fanotify`(Linux, 원인 pid 포함)
-2. 수정 이벤트는 파일 앞 64KB의 Shannon 엔트로피 계산 (암호화 데이터 ≈ 7.2+)
+2. 기본값은 파일 앞 64 KiB 엔트로피 관찰. `detection.content_sampling.enabled=true`이면 같은 총 예산을 앞·중간·끝에 나누고 위치·유형 힌트·이전 관찰 대비 변화를 저장한다. 이전 관찰은 정상본 판정이 아니다.
 3. 알림 억제와 독립적으로 매 이벤트의 위험도와 자동 대응 정책을 평가 (DB·백업보다 먼저)
 4. 슬라이딩 윈도우(기본 10초)에서 점수 산정:
    - notify: 대량 변경 40 + 서로 다른 파일의 고엔트로피 비율 35 + 이름 변경·삭제 비율 25
@@ -109,6 +109,10 @@ docker run --rm -v ${PWD}:/src -v argos-cargo-cache:/usr/local/cargo/registry -v
 5. 점수 ≥ 40 → 탐지 기록(+ 중앙 서버 보고), 점수 ≥ 80 + `auto_block=true` + pid 식별 → 프로세스 차단
 6. 별도 크기 제한 큐에서 실제 수집 시각으로 백업. baseline·해시 일치만으로 정상본을 판정하지 않는다.
 7. 검토한 버전을 정상본으로 지정한 뒤 `argos restore <path> --before-ms <공격시각>`으로 해시 검증 복구
+
+`detection.multi_window.enabled=true`로 10/60/600초별 임계치를 적용할 수 있다. 프로세스 인스턴스, 유효 UID+보호 경로, 보호 경로, 수집된 최대 4단계 부모 계보를 각각 평가한다. **계정·경로·계보 집계는 알림만 생성하며 현재 PID 차단 점수로 전환하지 않는다.** 승인 작업은 조정할 규칙 이름을 개별 지정해야 한다. 기본값은 두 기능 모두 비활성이다.
+
+이벤트·그룹·표본 이력은 상한이 있고 누락을 표시한다. 누락된 인스턴스 집계는 자동 차단 근거로 사용하지 않는다. 압축·이미지 등의 높은 엔트로피만으로 내용 변화 증거를 추가하지 않는다. 구체적인 설정과 합성 검증 범위는 [탐지 기능](docs/FEATURE_DETECTION.md), [설정 예시](config/argos.example.toml)를 참고한다. 샘플 밖 부분 암호화와 실제 운영 오탐률은 별도 검증 대상이다.
 
 ## 알려진 한계 (로드맵)
 
@@ -152,3 +156,15 @@ argos mcp # 설정한 단일 호스트 DB를 조회하는 stdio MCP 서버
 릴리즈 실행 파일의 요구사항과 서비스 설치 절차는 [Linux 바이너리 설치](docs/INSTALL_BINARY.md)를 참고한다.
 `argos incident ID --html NEW_FILE`은 시간순 조사 화면을, `argos recovery-status --html NEW_FILE`은 복구 준비도 화면을 생성한다.
 탐지와 실제 대응 결과는 별도 저장하며 `evidence`와 MCP의 `response_results`에서 확인할 수 있다.
+
+
+## 정책 신뢰와 Linux 조사 확장
+
+서명 정책 활성화는 버전·기간·호스트/그룹·키 ID를 검증하고 수락 원문과 감사 기록을 원자적으로 저장한다. 구버전 재적용을 거부하며 롤백도 새 높은 버전과 승인 근거가 필요하다. 기존 `pubkey` 설정에서 운영 활성화로 전환하는 절차는 [정책 신뢰](docs/FEATURE_POLICY.md)를 참고한다.
+
+- [Linux 설정 의미·UID/GID·capability 변화](docs/FEATURE_LINUX_ANALYSIS.md)
+- [사건별 복구 지점 보존과 승인 해제](docs/FEATURE_RECOVERY.md)
+- [마스킹·해시를 포함한 사고 증거 패키지](docs/FEATURE_EVIDENCE_PACKAGE.md)
+- 실제 임시 파일·프로세스를 사용하는 시나리오: `python3 scripts/security-scenarios.py --bin-dir target/debug --report /tmp/argos-scenarios.json`
+
+다중 시간 구간·내용 표본은 예제 설정에서 선택 활성화한다. 자동 차단 기본값은 비활성이다. 운영 탐지율·처리량이나 외부 승인자 인증은 별도 검증·연동 범위다.

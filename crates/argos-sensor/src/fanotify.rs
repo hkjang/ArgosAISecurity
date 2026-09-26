@@ -204,6 +204,7 @@ fn read_loop(
                                 action: FileAction::Modify,
                                 size: file.metadata().ok().map(|m| m.len()),
                                 entropy: None,
+                                content: None,
                                 process: super::procmon::read_file_process_context(meta.pid as u32),
                             };
                             receiver_closed = !health.deliver(&tx, event);

@@ -226,7 +226,7 @@ baseline_on_start = true
 
     def evidence_checks(self, config, database):
         malicious = '</script><script id="injected">window.ARGOS_SMOKE=1</script>'
-        context = dict(uid=1000, exe="/usr/bin/fixture", start_time_ticks=321, boot_id="fixture-boot")
+        context = dict(uid=1000, exe="/usr/bin/fixture", start_time_ticks=321, boot_id="fixture-boot", ancestors=[dict(pid=10, start_time_ticks=123, boot_id="fixture-boot")])
         with sqlite3.connect(database) as connection:
             for index, pid in enumerate([4242, 4242, 9090]):
                 event = dict(timestamp_ms=1000 + index, pid=pid, path=f"/fixture/{index}", action="Modify", size=64, entropy=7.9, process=context)

@@ -7,3 +7,6 @@ rust-version.workspace = true
 [dependencies]
 argos-common.workspace = true
 tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

@@ -144,6 +144,7 @@ fn handle_notify_event(
             action,
             size,
             entropy: None,
+            content: None,
             process: None,
         };
         if !health.deliver(tx, file_event) {

@@ -1,13 +1,13 @@
 # Linux 바이너리 설치
 
-v0.1.0 패키지는 x86_64 Linux와 **glibc 2.39 이상**을 요구한다. `libgcc_s.so.1`, `libm.so.6`, `libc.so.6`, `/lib64/ld-linux-x86-64.so.2`가 필요하다. 배포판의 glibc가 더 오래되었거나 아키텍처가 다르면 태그 소스에서 `cargo build --release --workspace --locked`로 빌드한다. Linux 소스 빌드 최소 Rust 버전은 1.86이고, 릴리즈 검증 버전은 1.93.1이다.
+v0.2.0 패키지는 x86_64 Linux와 **glibc 2.39 이상**을 요구한다. `libgcc_s.so.1`, `libm.so.6`, `libc.so.6`, `/lib64/ld-linux-x86-64.so.2`가 필요하다. 배포판의 glibc가 더 오래되었거나 아키텍처가 다르면 태그 소스에서 `cargo build --release --workspace --locked`로 빌드한다. Linux 소스 빌드 최소 Rust 버전은 1.86이고, 릴리즈 검증 버전은 1.93.1이다.
 
 GitHub 릴리즈에서 압축 파일과 `SHA256SUMS`를 같은 디렉터리에 내려받고 검증한다.
 
 ```bash
 sha256sum -c SHA256SUMS
-tar -xzf argos-v0.1.0-linux-x86_64-gnu.tar.gz
-cd argos-v0.1.0-linux-x86_64-gnu
+tar -xzf argos-v0.2.0-linux-x86_64-gnu.tar.gz
+cd argos-v0.2.0-linux-x86_64-gnu
 ./bin/argos --version
 ./bin/argos --help
 ```
@@ -26,7 +26,7 @@ mkdir -p watched argos-data
 
 ## systemd 서비스
 
-기존 설치를 교체할 때는 먼저 서비스를 중지하고 설정, 이벤트 DB 및 백업 저장소를 보관한다. 설치 예시는 다음과 같다. 기존 `/etc/argos/argos.toml`은 덮어쓰지 않는다.
+기존 설치를 교체할 때는 먼저 서비스를 중지하고 설정, 이벤트 DB 및 백업 저장소를 보관한다. 서명 정책을 사용하면 정책 상태 디렉터리도 함께 보관하고 [정책 설정 이전](FEATURE_POLICY.md#이전-설정에서-이전하기)을 먼저 완료한다. v0.1.0의 `policy.pubkey`만 있는 정책은 v0.2.0 운영 활성화에서 거부된다. 설치 예시는 다음과 같다. 기존 `/etc/argos/argos.toml`은 덮어쓰지 않는다.
 
 ```bash
 sudo install -m 0755 bin/argos bin/argos-agent bin/argos-central /usr/bin/
@@ -48,11 +48,12 @@ sudo journalctl -u argos-agent -n 100 --no-pager
 
 ## 검증
 
-패키지의 `scripts/smoke-test.sh`와 `scripts/platform-smoke.py`는 임시 경로에서 시험한다. Python 시험에는 Python 3이 필요하다.
+패키지의 `scripts/smoke-test.sh`와 `scripts/platform-smoke.py`, `scripts/security-scenarios.py`는 임시 경로에서 시험한다. Python 시험에는 Python 3이 필요하다.
 
 ```bash
 ARGOS_BIN_DIR="$PWD/bin" sh scripts/smoke-test.sh
 python3 scripts/platform-smoke.py --bin-dir "$PWD/bin"
+python3 scripts/security-scenarios.py --bin-dir "$PWD/bin"
 ```
 
 격리 시험은 사용자/네트워크 네임스페이스를 지원하는 환경에서만 실행한다. 재현 명령과 검증하지 않은 범위는 [검증 기록](PLATFORM_VALIDATION.md)을 확인한다.

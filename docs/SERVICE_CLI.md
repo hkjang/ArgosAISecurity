@@ -35,13 +35,9 @@
 - **`processes`** (Linux 전용):
   - 프로세스 모니터가 수집한 신규 Exec 실행 로그(`/proc` 스캔 결과)를 출력해 관리자가 위협 시점 전후에 가동된 비정상 명령행(`cmdline`)을 매핑할 수 있게 돕습니다.
 
-### 2.3. `explain` & `ask` (AI 융합 분석기)
-- **`explain <ID>`**:
-  - 대상 탐지 레코드의 발생 시각을 획득합니다.
-  - 해당 시각 전 $10$초 및 후 $5$초 범위 내의 모든 세부 파일 I/O 이벤트 로그를 SQLite에서 범위 쿼리(`events_between`)로 모아 RAG용 원시 문맥을 만듭니다.
-  - 이를 `DetectionContext`에 적재해 [argos-brain](file:///d:/project/ArgosAISecurity/crates/argos-brain/src) 라이브러리의 `explain` 인터페이스로 토스하며, 결과로 인공지능이 도출한 한국어 침해 보고서 원문을 표시합니다.
-- **`ask "<질문>"`**:
-  - 에이전트 가동 상태 정보, 최근 탐지 30건, 최근 I/O 기록 80건, 프로세스 실행 기록 40건을 직렬화한 시스템 감사 덤프(`CopilotContext`)를 구축해 질문과 함께 Claude에 주입합니다.
+### 2.3. `explain` & `ask`
+
+`explain <ID>`는 탐지 시간창과 이후 5초의 근거를 조회한다. 다중 시간 구간 규칙은 설정된 가장 긴 시간창을 포함한다. `ask`는 질문에서 해석한 기간 또는 명시한 `--from-ms`/`--to-ms`와 선택 PID로 조회한다. 근거 ID·종류별 전체 건수·상한으로 인한 누락과 대응 결과를 AI에 전달한다. 제공자·주소·모델은 설정하며 상세한 범위는 [AI/조사 문서](FEATURE_AI.md)를 따른다.
 
 ### 2.4. `restore` (내용 주소 지정 백업 복구)
 - 사용자가 복구를 희망하는 대상 경로와 선택 매개변수(`--before-ms` 등)를 확인합니다.
@@ -54,7 +50,7 @@
 - `--release` 유무를 체크하여 `ARGOS_ISOLATE` 체인을 생성하여 OUTPUT 체인에 인서트하거나 소거 롤백을 처리합니다.
 
 ### 2.6. `policy` (Ed25519 설정 무결성 서명)
-- **`gen-key`**: Ed25519 타원곡선 키쌍을 생성해 콘솔에 출력합니다. 서명키는 로컬 파일(예: `signing.key`)로 안전 보관하고 검증키는 `argos.toml`의 `pubkey`로 지정합니다.
+- **`gen-key`**: Ed25519 타원곡선 키쌍을 생성해 콘솔에 출력합니다. 서명키는 로컬 파일(예: `signing.key`)로 안전 보관하고 검증키는 `argos.toml`의 `[policy.trusted_keys]`에서 키 ID에 연결합니다.
 - **`sign`**: 대상 `policy.toml` 파일 바이트 전체와 서명키 파일을 로드해 전자 서명을 연산하고 동명의 서명 파일 `policy.toml.sig`를 생성합니다.
 - **`verify`**: 서명 정책 파일과 `.sig` 파일을 검증키로 대조하여 정형 변조 여부를 1차 검증합니다.
 - **`show`**: 에이전트에 현재 로드되어 실 작동하고 있는 설정 정책의 세부 사항 및 검증 성공 상태를 표시합니다.
@@ -73,3 +69,15 @@
 - `isolate --allow in:192.0.2.20:22 --allow out:10.0.0.5:8420 --dry-run`: 격리 계획 출력. 적용·해제는 [격리 문서](FEATURE_RESPONSE.md) 참조.
 
 잘못된 TOML 설정은 기본값으로 무시하지 않고 오류로 종료한다. `status`는 로컬 생존 신호 시각과 큐/백업/센서 지표를 표시한다. 오래된 신호나 기록 없음은 안전하다는 의미가 아니다.
+
+
+## 정책 신뢰·사건 보존·증거 패키지
+
+- `argos policy status --limit 100`: 마지막 수락 정책과 거부/재시작/롤백 감사 기록. `policy show`는 후보 파일 대신 마지막 수락 원문을 조회한다.
+- `argos retention pin PATH --version ID --incident INC --actor USER --reason TEXT`: 정상 판정과 별도로 사건 보존 참조를 추가한다.
+- `argos retention list --incident INC`, `argos retention audit --incident INC`: 활성 참조와 감사 이력.
+- `argos retention release --incident INC --approval APPROVAL_ID --approver USER --reason TEXT`: 별도 승인 근거로 사건 참조 해제.
+- `argos evidence-export ID --out NEW_DIR`: 기본 마스킹을 적용한 사건 증거 패키지.
+- `argos evidence-verify DIR`: 파일 목록·크기·SHA-256 검증.
+
+상세 조건은 [정책 신뢰](FEATURE_POLICY.md), [복구 보존](FEATURE_RECOVERY.md), [증거 패키지](FEATURE_EVIDENCE_PACKAGE.md)를 참고한다.
