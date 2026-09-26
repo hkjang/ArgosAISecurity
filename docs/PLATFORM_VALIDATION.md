@@ -52,6 +52,19 @@ ARGOS_TEST_POSTGRES_ROOT=/path/to/trusted/postgresql/root cargo test -p argos-re
 
 프로브 성공은 한 파일의 전달, DB 성공은 계획한 DB 검사, 수신증명은 지정 키의 보관 수락, AI 검사는 인용 형식/존재를 확인한 결과다. 전체 감시·서비스 RTO/RPO·서버 관리자 삭제 방지·AI 문장 의미의 참으로 확대 해석하지 않는다.
 
+
+## v0.3.0 배포 산출물 확인
+
+태그와 `BUILD_INFO.json`의 소스 커밋은 `d7681053036c51ecdbbe343a9578ffa2f95a2f57`이다. 업로드한 [릴리즈 압축 파일](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.3.0)을 다시 내려받아 `SHA256SUMS`, 패키지 내부 네 실행 파일의 해시·크기 및 소스 정보를 확인했다. 문서·설정·검증 스크립트 포함과 각 실행 파일의 도움말 실행도 검사했다.
+
+`argos-v0.3.0-linux-x86_64-gnu.tar.gz`의 SHA-256:
+
+```text
+78316959ae17557ac9c23c3c1f4c48619d1c78e80010e2c637249ffcdb0ad642
+```
+
+실행 파일 요구 glibc는 `argos` 2.39, `argos-agent`·`argos-central`·`argos-vault` 2.34다. 이후 `main`의 배포 검증 문서 갱신은 발행한 태그·압축 파일을 변경하지 않는다.
+
 ## 기존 v0.1.0 실행 결과
 
 - `cargo test --workspace`: **96개 단위/회귀 테스트 통과**.
@@ -79,7 +92,7 @@ ARGOS_TEST_POSTGRES_ROOT=/path/to/trusted/postgresql/root cargo test -p argos-re
 
 외부 승인자 인증, 완전한 Linux 유효 설정 평가, 사건 당시 실제 실행 정책 증명, 실행 파일 해시/패키지 신뢰, 서비스 영향 및 CPU/디스크 기반 자동 축소는 이 구현의 완료 범위가 아니다. 서명 정책 상태와 백업 저장소는 로컬 관리자/root에 대한 별도 외부 보존 경계를 제공하지 않는다.
 
-## 배포 산출물 검증
+## v0.2.0 배포 산출물 검증
 
 [v0.2.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.2.0)의 태그와 `BUILD_INFO.json`은 소스 커밋 `0a3fc4c38d1d76d02464bf57adbe6e33f794fdfa`를 가리킨다. 패키지 내 실행 파일별 해시·크기, CLI 버전, 도움말 실행, 문서·설정·시험 스크립트 포함을 확인했다. 업로드한 파일을 다시 내려받아 `SHA256SUMS`와 일치함을 확인했다.
 
