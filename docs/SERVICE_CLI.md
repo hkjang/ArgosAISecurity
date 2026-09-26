@@ -58,3 +58,18 @@
 - **`sign`**: 대상 `policy.toml` 파일 바이트 전체와 서명키 파일을 로드해 전자 서명을 연산하고 동명의 서명 파일 `policy.toml.sig`를 생성합니다.
 - **`verify`**: 서명 정책 파일과 `.sig` 파일을 검증키로 대조하여 정형 변조 여부를 1차 검증합니다.
 - **`show`**: 에이전트에 현재 로드되어 실 작동하고 있는 설정 정책의 세부 사항 및 검증 성공 상태를 표시합니다.
+
+
+## 검증 가능한 대응·복구 명령 (2026-09)
+
+- `policy simulate --candidate PATH --from-ms N --to-ms N [--max-events N]`: 기존/후보 정책을 저장 근거에 재생한다. 실제 차단이나 적용은 없다.
+- `restore PATH --list`: 무결성과 별개인 정상 판정 상태/근거를 확인한다.
+- `restore PATH --mark-good ID --note TEXT`, `--revoke-good ID --note TEXT`: 정상 판정 지정/취소.
+- `restore PATH --version ID --preview NEW_PATH`: 미검토 버전도 별도 새 파일로 검사한다.
+- `restore PATH [--before-ms N]`: 지정 구간의 정상 판정 버전만 복구한다. 미검토 최신본으로 자동 대체하지 않는다.
+- `recovery-status [--test PATH] [--html NEW_PATH]`: 복구 준비도와 원본 유지 복구 시험. 중요 경로의 현재 파일 중 미기록 파일도 표시하며, 10,000개 경로 검사 상한/접근 실패는 부분 검사로 알린다.
+- `evidence`, `ask`, `mcp`, `incident`: [AI/조사 문서](FEATURE_AI.md) 참조.
+- `canary-init ABSOLUTE_PATH`: 설정된 미끼 파일을 기존 파일 덮어쓰기 없이 만든다. 센서 시작 전에 설치한다.
+- `isolate --allow in:192.0.2.20:22 --allow out:10.0.0.5:8420 --dry-run`: 격리 계획 출력. 적용·해제는 [격리 문서](FEATURE_RESPONSE.md) 참조.
+
+잘못된 TOML 설정은 기본값으로 무시하지 않고 오류로 종료한다. `status`는 로컬 생존 신호 시각과 큐/백업/센서 지표를 표시한다. 오래된 신호나 기록 없음은 안전하다는 의미가 아니다.

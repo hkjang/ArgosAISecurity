@@ -40,10 +40,14 @@ enabled = true
 dir = "./argos-data/backup"
 # 이 크기를 넘는 파일은 백업하지 않음 (bytes)
 max_file_bytes = 52428800
-# 경로당 보존 버전 수
+# 경로당 미검토 버전 보존 수 (정상 판정 버전은 명시적 취소 전 보존)
 keep_versions = 5
 # 에이전트 시작 시 기존 파일 1회 베이스라인 백업
 baseline_on_start = true
+# baseline은 자동으로 정상본이 되지 않는다. restore --mark-good으로 검토 근거를 남긴다.
+queue_capacity = 256
+# 한 파일 크기의 burst를 허용하는 평균 처리 예산 (bytes/sec)
+io_bytes_per_sec = 10485760
 
 [policy]
 # 서명된 정책 파일 사용 (요건서 11장 — 서명된 정책만 적용).
@@ -62,7 +66,19 @@ interval_ms = 1000
 # 중앙관리 서버 URL. 비우면 standalone 모드.
 # 예: url = "http://central.example.com:8420"
 url = ""
-# Bearer 인증 토큰 (argos-central --token 과 동일 값)
+# Bearer 개별 에이전트 토큰 (중앙 --agent-tokens 파일의 해당 agent_id 값)
 token = ""
 # 비우면 hostname 사용
 agent_id = ""
+
+[ai]
+# 온프레미스: provider = "ollama", endpoint = "http://127.0.0.1:11434/api/chat"
+provider = "anthropic"
+endpoint = ""
+# 실제 사용할 모델 ID 또는 ARGOS_AI_MODEL 환경변수 (자동 선택 없음)
+model = ""
+# 비어 있으면 anthropic만 ANTHROPIC_API_KEY 사용. ollama는 인증키 전송 없음.
+api_key_env = ""
+timeout_secs = 60
+# 각 이벤트 종류별 근거 상한; 초과 건수는 AI 입력·CLI에 명시
+evidence_limit = 200

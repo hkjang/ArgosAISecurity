@@ -4,9 +4,14 @@
 # 사용: docker run --rm -v <repo>:/src -v argos-target-cache:/src/target -w /src rust:latest sh scripts/smoke-test.sh
 set -e
 
-BIN=/src/target/debug
-WORK=/tmp/argos-smoke
-rm -rf "$WORK"
+BIN=${ARGOS_BIN_DIR:-${CARGO_TARGET_DIR:-target}/debug}
+WORK=$(mktemp -d /tmp/argos-smoke.XXXXXX)
+AGENT_PID=""
+cleanup() {
+    if [ -n "$AGENT_PID" ]; then kill -INT "$AGENT_PID" 2>/dev/null || true; fi
+    rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
 mkdir -p "$WORK/watched"
 
 cat > "$WORK/argos.toml" <<EOF
@@ -28,6 +33,10 @@ echo "=== 에이전트 기동 ==="
 "$BIN/argos-agent" --config "$WORK/argos.toml" &
 AGENT_PID=$!
 sleep 2
+# 테스트에서 작성한 정상 내용을 검토된 복구 지점으로 명시한다.
+BASELINE_ID=$("$BIN/argos" --config "$WORK/argos.toml" restore "$WORK/watched/contract.docx" --list | awk '/^[0-9]/ {print $1; exit}')
+test -n "$BASELINE_ID"
+"$BIN/argos" --config "$WORK/argos.toml" restore "$WORK/watched/contract.docx" --mark-good "$BASELINE_ID" --note "smoke fixture normal content verified"
 
 echo "=== 랜섬웨어 패턴 시뮬레이션 (고엔트로피 쓰기 + 확장자 변경 x40) ==="
 ATTACK_MS=$(($(date +%s%N) / 1000000))
@@ -41,8 +50,9 @@ done
 dd if=/dev/urandom of="$WORK/watched/contract.docx" bs=4096 count=1 2>/dev/null
 sleep 3
 
-kill "$AGENT_PID" 2>/dev/null || true
-wait "$AGENT_PID" 2>/dev/null || true
+kill -INT "$AGENT_PID" 2>/dev/null || true
+wait "$AGENT_PID"
+AGENT_PID=""
 
 echo ""
 echo "=== argos status ==="
@@ -61,7 +71,11 @@ echo "=== 복구: contract.docx 버전 목록 ==="
 "$BIN/argos" --config "$WORK/argos.toml" restore "$WORK/watched/contract.docx" --list
 
 echo ""
-echo "=== 복구 실행 (공격 시작 시각 $ATTACK_MS 이전 버전) ==="
+echo "=== 별도 경로 미리보기 + 원본 유지 복구 시험 ==="
+"$BIN/argos" --config "$WORK/argos.toml" restore "$WORK/watched/contract.docx" --version "$BASELINE_ID" --preview "$WORK/preview.docx"
+test "$(cat "$WORK/preview.docx")" = "important business document"
+"$BIN/argos" --config "$WORK/argos.toml" recovery-status --test "$WORK/watched/contract.docx"
+echo "=== 복구 실행 (공격 시작 시각 $ATTACK_MS 이전 정상 버전) ==="
 "$BIN/argos" --config "$WORK/argos.toml" restore "$WORK/watched/contract.docx" --before-ms "$ATTACK_MS"
 echo "복구된 내용: $(cat "$WORK/watched/contract.docx")"
 
@@ -98,6 +112,9 @@ db_path = "$WORK/argos.db"
 path = "$WORK/policy.toml"
 pubkey = "$PUBLIC"
 EOF
+echo "-- 후보 정책 읽기 전용 재생 --"
+"$BIN/argos" --config "$WORK/argos.toml" policy simulate --candidate "$WORK/policy.toml" --from-ms 0 --to-ms "$(($(date +%s%N) / 1000000))" > "$WORK/simulation.json"
+grep '"candidate"' "$WORK/simulation.json"
 echo "-- 정상 정책 검증 --"
 "$BIN/argos" --config "$WORK/argos-policy.toml" policy verify
 

@@ -2,13 +2,17 @@
 name = "argos-policy"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 argos-common.workspace = true
+argos-detect.workspace = true
+argos-storage.workspace = true
 ed25519-dalek.workspace = true
 rand_core.workspace = true
 hex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 toml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -1,70 +1,73 @@
-# Argos 위협 대응 및 차단 기능 분석서
+# Argos 대응과 격리 검증
 
-**Argos 위협 대응 엔진**은 침해 위협 점수가 한계를 돌파했을 때 해를 입히고 있는 원인 프로세스를 커널 시그널을 이용하여 강제 중단하거나, 호스트 시스템의 패킷 통신망을 동적으로 격리 조치하여 피해 확산을 실시간 차단하는 실시간 침해 조치 컴포넌트입니다.
+프로세스 대응은 [argos-response](../crates/argos-response/src/lib.rs), 네트워크 격리는 [isolate 모듈](../crates/argos-response/src/isolate.rs)이 담당한다.
 
----
+## 위험 점수와 프로세스 차단
 
-## 1. 핵심 설계 및 컴포넌트
+탐지 엔진은 매 파일 이벤트의 위험 점수와 최소 변경 파일 수 조건을 평가한다. 알림의 중복 억제는 대응 판단에 영향을 주지 않는다. `auto_block=true`, `score >= block_score`, 식별 가능한 PID, 최소 변경 파일 수 조건을 모두 충족할 때만 자동 대응한다. 기본값은 `auto_block=false`, `block_score=80`이다.
 
-위협 대응 및 격리는 [argos-response](file:///d:/project/ArgosAISecurity/crates/argos-response/src) 라이브러리가 전담합니다.
-- **`Responder` 트레잇** ([lib.rs](file:///d:/project/ArgosAISecurity/crates/argos-response/src/lib.rs)): 다중 플랫폼 기동 및 자동 차단 구성 설정 온오프에 유기적으로 호환 동작하기 위해 선언된 공통 조치 인터페이스입니다.
-- **`LinuxResponder`**: 리눅스 환경에서 실제 커널 시그널을 가동시키는 물리 대응 클래스입니다.
-- **`DryRunResponder`**: 자동 차단 옵션 비활성화(`auto_block=false`) 상태에서 조치는 하지 않고 관제 로그만 전송하는 모의 대응 클래스입니다.
-- **`isolate` 모듈** ([isolate.rs](file:///d:/project/ArgosAISecurity/crates/argos-response/src/isolate.rs)): 리눅스 iptables 도구와 연동하여 아웃바운드 인터넷 연결을 물리 격리하는 방어 서브시스템입니다.
+- `KillProcess`는 SIGKILL, `SuspendProcess`는 SIGSTOP을 보낸다.
+- PID 0은 센서가 프로세스를 식별하지 못했다는 뜻이다. 프로세스 그룹에 잘못 시그널을 보내지 않도록 거부한다.
+- fanotify는 수정 이벤트만 제공하므로 대량 변경 40점과 고엔트로피 파일 비율 60점으로 평가한다. notify는 대량 변경 40점, 고엔트로피 파일 비율 35점, 이름 변경·삭제 비율 25점을 사용한다.
+- 엔트로피를 읽지 못한 경우 해당 증거 점수를 추가하지 않는다. 센서·샘플링 설정에서 도달할 수 없는 임계치는 시작 시 경고한다.
 
----
+## 명시적 관리 연결을 통한 격리
 
-## 2. 프로세스 시그널링 차단 및 안전 메커니즘
+`--allow`에는 연결 방향, 숫자 IP 또는 CIDR, TCP 서비스 포트를 지정한다. `in`은 관리자가 이 서버로 접속하는 경우, `out`은 이 서버가 중앙 서버 등으로 접속하는 경우다. 회신은 같은 IP·포트 조건을 만족하는 conntrack REPLY 방향의 ESTABLISHED 연결만 허용한다. 호스트명, 포트 없는 IP, `/0`, 포트 0은 거부한다.
 
-수집된 센서 데이터 분석을 거쳐 위협 스코어가 대응 수치(`block_score`, 기본값 80점)를 상회하면 에이전트 데몬은 `Responder::execute`를 수행합니다.
+```bash
+# 명령과 restore 입력만 출력한다. 권한이나 방화벽 도구가 필요하지 않다.
+argos isolate --dry-run \
+  --allow in:192.0.2.20:22 \
+  --allow out:10.0.0.5:8443 \
+  --allow 'out:[2001:db8::5]:8443'
 
-### 2.1. 대응 액션 범주 (`ResponseAction`)
-1. **`KillProcess(Pid)`**:
-   - 악성 쓰기를 주도하는 프로세스에 `libc::SIGKILL` (시그널 번호 9) 신호를 전달하여 즉각 사살 및 소멸시킵니다.
-2. **`SuspendProcess(Pid)`**:
-   - 보안 실무자의 위협 상세 포렌식 조사를 지원하기 위해 프로세스의 동작을 메모리 상에 그대로 멈추게 하는 `libc::SIGSTOP` (시그널 번호 19) 신호를 주입합니다.
+# 관리 경로를 확인한 뒤 실제 적용한다 (Linux, root 필요).
+sudo argos isolate \
+  --allow in:192.0.2.20:22 \
+  --allow out:10.0.0.5:8443
 
-### 2.2. 안전 제어 장치 (PID 0 오동작 거부)
-- `fanotify` 센서가 정상 동작하지 못하는 Fallback notify 센서 가동 시에는 이벤트를 유발한 원인 프로세스의 PID를 디코딩하지 못하고 `0`으로 보고합니다.
-- 리눅스 시스콜 상에서 `kill(0, signal)` 명령어 호출을 가동시키면 **에이전트 데몬이 속한 동일 프로세스 그룹의 모든 정상 서버 서비스 프로세스가 함께 SIGKILL을 맞는 최악의 장애(자살 현상)**를 초래하게 됩니다.
-- 이를 예방하기 위해 `LinuxResponder` 내부에는 대상 PID가 `0`인 조치 요청이 수신되는 순간 작업을 거절하고 `ResponseError::UnknownPid` 에러를 반환하는 방어망을 견고하게 가동하고 있습니다.
-
----
-
-## 3. iptables 기반 네트워크 호스트 선별 격리
-
-랜섬웨어가 외부 C2 서버와 통신하며 중요 기밀을 탈취하거나 추가 악성 암호화 키를 발급받는 연결을 끊어버리기 위해 `isolate` 서브시스템을 기동합니다.
-
-### 3.1. 격리 룰 생성 순서 및 원리
-`isolation_commands` 함수는 시스템 방화벽 환경에 다음 순서의 동적 격리 명령 셋을 구성해 인계합니다.
-
-```
-[커스텀 격리 체인 생성] ➔ iptables -N ARGOS_ISOLATE
-                                 │
-                                 ▼
-[체인 규칙 완전 초기화] ➔ iptables -F ARGOS_ISOLATE
-                                 │
-                                 ▼
-[루프백 패킷 전송 인가] ➔ iptables -A ARGOS_ISOLATE -o lo -j ACCEPT
-                                 │
-                                 ▼
-[기존 세션 통신 유지] ➔ iptables -A ARGOS_ISOLATE -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-                                 │
-                                 ▼
-[중앙 서버 API 주소 예외 인가] ➔ iptables -A ARGOS_ISOLATE -d <중앙서버IP> -j ACCEPT
-                                 │
-                                 ▼
-[나머지 아웃바운드 전체 Drop] ➔ iptables -A ARGOS_ISOLATE -j DROP
-                                 │
-                                 ▼
-[최우선 OUTPUT 인서트] ➔ iptables -I OUTPUT 1 -j ARGOS_ISOLATE
+sudo argos isolate --release
 ```
 
-1. **기존 접속 유지 (Est/Rel)**: 관리자가 서버를 점검하기 위해 SSH 접속 등을 수행 중인 경우, 네트워크 격리가 기동되자마자 SSH 접속 세션까지 다 차단되어 관리 도구가 차단되는 참사를 방어하기 위해 기존 확립 연결은 정상 흐름을 보장해 줍니다.
-2. **관제 전송 유지 (Central IP 예외)**: 에이전트 노드가 고립되더라도 위험 탐지 보고 데이터는 실시간으로 관제 센터에 보고되어 모니터링이 가능해야 하므로, 설정된 `central.url`의 호스트 목적지 패킷은 차단 목록에서 자동 예외 처리합니다.
-3. **OUTPUT 체인 멱등 결합**: 이중 결합으로 인한 충돌 방지를 위해 먼저 `OUTPUT` 체인에서 점프 규칙을 탈거한 뒤, 최우선 순위 1번 슬롯으로 `ARGOS_ISOLATE` 체인을 점프 대상으로 강제 인서트(`-I OUTPUT 1`)합니다.
+중앙 서버 주소를 자동으로 모든 포트에 허용하지 않는다. 사용자가 중앙 서버의 실제 IP와 포트를 명시한다. 관리 SSH 연결도 예외에 포함되지 않으면 끊긴다. 일반 ESTABLISHED/RELATED 허용은 제거했으므로 기존 공격자 연결의 후속 패킷도 차단된다. TCP 소켓이나 conntrack 항목 자체를 삭제하는 기능은 아니다.
 
-### 3.2. 격리 롤백 원상 복구 (`release`)
-위협 상황이 해제되면 CLI 명령어(`argos isolate --release`)를 작동해 iptables 롤백 체인을 가동합니다.
-- `release_commands`는 `OUTPUT`의 점프 규칙을 탈거하고, `ARGOS_ISOLATE` 내부 목록을 초기화(`-F`)한 뒤 체인 구조체 자체를 소거(`-X`)하는 복원 작업을 진행합니다.
-- 복구 명령들은 이미 해제된 상태에서 중복 호출되더라도 무해하도록 에러를 무시하는 멱등성 실행 모드로 구동됩니다.
+| 경로 | IPv4 / IPv6 동작 |
+| --- | --- |
+| INPUT | loopback과 지정 관리 연결·회신을 허용한 뒤 DROP |
+| OUTPUT | loopback과 지정 관리 연결·회신을 허용한 뒤 DROP |
+| FORWARD | 전체 DROP, 호스트를 통과하는 컨테이너 전달 트래픽 포함 |
+| IPv6 링크 제어 | hop limit 255의 이웃 탐색과 제한된 링크 로컬 라우터 탐색 허용 |
+
+독립 네트워크 네임스페이스, 호스트 FORWARD를 거치지 않는 macvlan/직접 장치 경로, eBPF 데이터 경로, 하드웨어 오프로드까지 이 규칙만으로 격리된다고 보장하지 않는다. 실제 배포 환경에서 각 경로의 패킷 차단을 검증해야 한다.
+
+## 적용·해제와 실패 보고
+
+1. `iptables-save`와 `ip6tables-save`로 기존 filter 테이블을 읽는다.
+2. 두 주소 계열 모두 `iptables-restore` / `ip6tables-restore`의 `--noflush --test`로 사전 검사한다. 이 단계가 실패하면 변경하지 않는다.
+3. 각 주소 계열에서 Argos 체인과 세 진입점의 점프를 하나의 restore 트랜잭션으로 반영한다. 기존 다른 체인·정책은 유지한다. 재적용 시 중복 점프와 구형 `ARGOS_ISOLATE`를 정리한다.
+4. 다시 읽어 INPUT/OUTPUT/FORWARD의 최상단 점프, 규칙 수, 마지막 DROP을 확인한다. 각 규칙을 `iptables -C` / `ip6tables -C`로 확인해 IP·포트·연결 방향 조건도 검증한다.
+
+IPv4와 IPv6 사이의 전체 적용은 원자적이지 않다. 두 번째 계열 적용이나 확인에 실패하면 부분 적용 가능성을 포함한 오류를 반환한다. 적용된 격리를 자동으로 풀지는 않는다. 관리자는 반환된 오류와 실제 방화벽 상태를 확인하고 재적용하거나 `--release`로 해제한다.
+
+해제는 현재 존재하는 Argos 점프와 체인만 제거하고 양쪽 주소 계열에 남은 체인이 없는지 확인한다. 권한 부족, 명령 실패, 확인 실패를 성공으로 처리하지 않는다. 재시작이나 다른 방화벽 관리 도구에 의한 이후 변경을 지속적으로 감시하는 기능은 아직 없다.
+
+## 검증 범위
+
+단위 테스트는 두 주소 계열의 명령 계획, 명시적 관리 예외, 전달 차단, 구형 규칙 정리, 사전 검사 실패 시 미변경, 부분 적용 오류, 해제 반복, 적용 후 확인 실패를 검증한다. 가짜 실행기를 사용해 실패 분기도 검사한다.
+
+[격리 네임스페이스 패킷 시험](../scripts/test-isolation-netns.py)은 호스트와 분리된 user/net namespace에서 실행한다. IPv4·IPv6 각각 INPUT/OUTPUT 관리 연결 유지, 기존 의심 연결 차단, 신규 의심 연결 차단, FORWARD 전달 차단, 재적용 시 중복 방지, 반복 해제 후 통신 복구, 무관한 기존 규칙 보존을 실제 TCP 패킷으로 검증한다. iptables-nft 1.8.11 환경에서 이 시험을 통과했다. 물리 장치·특정 컨테이너 런타임·오프로드 경로는 별도 검증 대상이다.
+
+```bash
+cargo build -p argos-cli
+python3 scripts/test-isolation-netns.py --argos "$PWD/target/debug/argos"
+```
+
+Netfilter의 [conntrack match 문서](https://ipset.netfilter.org/iptables-extensions.man.html)와 [iptables-restore 매뉴얼](https://man7.org/linux/man-pages/man8/iptables-restore.8.html)의 `--noflush`, `--test` 동작을 기준으로 작성했다.
+
+
+## 프로세스 자동 대응 결과 확인
+
+자동 대응은 이벤트에 저장된 PID·시작 ticks·부팅 ID가 있어야 실행한다. Linux에서 pidfd를 연 뒤 현재 시작 신원을 확인하고 그 FD로 SIGKILL을 전송한다. 최대 1초 안에 pidfd가 종료 상태를 나타내는지 확인한다. 미지원 커널·신원 변경·확인 시간 초과는 성공으로 표시하지 않는다. PID 0·1·자기 자신·음수 pid로 변환되는 범위는 거부한다.
+
+감사는 `succeeded`, `failed_or_unconfirmed`, `rejected`, `observed_threshold`를 구분한다. 관찰 모드의 점수 통과는 실제 차단이 아니다. `evidence`/MCP `response_results`와 사건 HTML에서 결과를 조회할 수 있다.

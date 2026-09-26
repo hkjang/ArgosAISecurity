@@ -97,6 +97,7 @@ name = "argos-brain"
 version = "0.1.0"
 dependencies = [
  "argos-common",
+ "argos-storage",
  "reqwest",
  "serde",
  "serde_json",
@@ -130,6 +131,8 @@ dependencies = [
  "argos-response",
  "argos-storage",
  "clap",
+ "serde_json",
+ "toml",
 ]
 
 [[package]]
@@ -155,10 +158,13 @@ name = "argos-policy"
 version = "0.1.0"
 dependencies = [
  "argos-common",
+ "argos-detect",
+ "argos-storage",
  "ed25519-dalek",
  "hex",
  "rand_core 0.6.4",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "toml",
  "tracing",
@@ -170,7 +176,9 @@ version = "0.1.0"
 dependencies = [
  "argos-common",
  "hex",
+ "libc",
  "rusqlite",
+ "serde",
  "sha2",
  "thiserror 1.0.69",
  "tracing",
@@ -193,6 +201,7 @@ dependencies = [
  "argos-common",
  "libc",
  "notify",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -204,6 +213,7 @@ version = "0.1.0"
 dependencies = [
  "argos-common",
  "rusqlite",
+ "serde",
  "serde_json",
  "thiserror 1.0.69",
 ]

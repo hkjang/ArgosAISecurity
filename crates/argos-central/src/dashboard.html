@@ -20,6 +20,9 @@
   .sev-medium   { color: #ffd54f; }
   .sev-low      { color: #81c784; }
   .muted { color: #6b7785; }
+  .status-online { color: #81c784; }
+  .status-stale { color: #ffd54f; }
+  .status-offline { color: #ff8a65; }
   #error { color: #ff8a65; padding: 8px 0; }
 </style>
 </head>
@@ -59,7 +62,7 @@
 <main>
   <h2>에이전트 현황</h2>
   <table id="agents"><thead><tr>
-    <th>Agent ID</th><th>Hostname</th><th>태그</th><th>마지막 보고</th><th>누적 탐지</th>
+    <th>Agent ID</th><th>Hostname</th><th>태그</th><th>연결·센서</th><th>전송 대기</th><th>마지막 보고</th><th>누적 탐지</th>
   </tr></thead><tbody></tbody></table>
 
   <h2 style="margin-top:32px">최근 탐지</h2>
@@ -77,6 +80,13 @@ function saveTokenAndLoad() {
   load();
 }
 function fmtTs(ms) { return ms ? new Date(ms).toLocaleString('ko-KR') : '-'; }
+function statusClass(status) { return ['online', 'stale', 'offline'].includes(status) ? status : 'offline'; }
+function statusText(a) {
+  const connected = { online: '연결됨', stale: '보고 지연', offline: '연결 끊김' }[a.status] || '미확인';
+  const sensor = a.sensor_healthy === true ? '센서 정상' : a.sensor_healthy === false ? '센서 중단' : '센서 미확인';
+  return connected + ' / ' + sensor;
+}
+function severityClass(severity) { return ['critical', 'high', 'medium', 'low'].includes(severity) ? severity : 'low'; }
 function esc(s) {
   const d = document.createElement('div');
   d.textContent = s == null ? '' : String(s);
@@ -100,12 +110,14 @@ async function load() {
     document.querySelector('#agents tbody').innerHTML = agents.map(a => `
       <tr><td>${esc(a.agent_id)}</td><td>${esc(a.hostname)}</td>
       <td class="muted">${esc((a.tags||[]).join(', '))}</td>
+      <td class="status-${statusClass(a.status)}">${esc(statusText(a))}</td>
+      <td title="누적 전송 실패: ${Number(a.failed_attempts) || 0}">${Number(a.outbox_pending) || 0}</td>
       <td>${fmtTs(a.last_seen_ms)}</td><td>${a.detection_count}</td></tr>
-    `).join('') || '<tr><td colspan="5" class="muted">등록된 에이전트 없음</td></tr>';
+    `).join('') || '<tr><td colspan="7" class="muted">등록된 에이전트 없음</td></tr>';
 
     document.querySelector('#detections tbody').innerHTML = detections.map(d => `
       <tr><td>${fmtTs(d.timestamp_ms)}</td><td>${esc(d.agent_id)}</td>
-      <td class="sev-${esc(d.severity)}">${esc(d.severity)}</td>
+      <td class="sev-${severityClass(d.severity)}">${esc(d.severity)}</td>
       <td>${Math.round(d.score)}</td><td class="muted">${esc(d.rule)}</td><td>${esc(d.summary)}</td></tr>
     `).join('') || '<tr><td colspan="6" class="muted">탐지 없음</td></tr>';
   } catch (e) {

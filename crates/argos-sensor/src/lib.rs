@@ -13,13 +13,17 @@ use notify::{Event as NotifyEvent, EventKind, RecommendedWatcher, RecursiveMode,
 use std::path::PathBuf;
 use tokio::sync::mpsc::Sender;
 
+mod health;
+use health::SensorHealth;
+pub use health::SensorHealthSnapshot;
+
 #[cfg(target_os = "linux")]
 mod fanotify;
 #[cfg(target_os = "linux")]
 pub mod procmon;
 
 #[cfg(target_os = "linux")]
-pub use procmon::spawn_proc_monitor;
+pub use procmon::{spawn_proc_monitor, ProcessMonitorHandle};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SensorError {
@@ -35,11 +39,32 @@ pub enum SensorError {
     FanotifyUnsupported,
 }
 
-/// 감시를 유지하는 핸들. drop되면 감시가 중단된다.
-pub enum SensorHandle {
-    Notify(RecommendedWatcher),
+/// 감시를 유지하는 핸들. drop되면 감시 중단을 요청한다.
+pub struct SensorHandle {
+    _backend: SensorBackend,
+    health: SensorHealth,
+}
+
+enum SensorBackend {
+    Notify {
+        _watcher: RecommendedWatcher,
+    },
     #[cfg(target_os = "linux")]
-    Fanotify(fanotify::FanotifyHandle),
+    Fanotify {
+        _handle: fanotify::FanotifyHandle,
+    },
+}
+
+impl SensorHandle {
+    pub fn health(&self) -> SensorHealthSnapshot {
+        self.health.snapshot()
+    }
+}
+
+impl Drop for SensorHandle {
+    fn drop(&mut self) {
+        self.health.stop();
+    }
 }
 
 /// 설정된 백엔드로 센서를 시작한다.
@@ -53,7 +78,12 @@ pub fn spawn_sensor(
         SensorKind::Fanotify => {
             #[cfg(target_os = "linux")]
             {
-                fanotify::spawn(paths, tx).map(SensorHandle::Fanotify)
+                let health = SensorHealth::default();
+                let handle = fanotify::spawn(paths, tx, health.clone())?;
+                Ok(SensorHandle {
+                    _backend: SensorBackend::Fanotify { _handle: handle },
+                    health,
+                })
             }
             #[cfg(not(target_os = "linux"))]
             {
@@ -64,46 +94,62 @@ pub fn spawn_sensor(
     }
 }
 
-/// notify 기반 센서. 콜백은 notify의 자체 스레드에서 호출되므로
-/// `blocking_send`를 사용한다. 채널이 가득 차면 backpressure로 대기한다.
+/// notify 콜백은 try_send로 전달한다. 포화된 에이전트 큐 때문에 OS 수집 스레드를 멈추지 않는다.
 fn spawn_notify_sensor(
     paths: &[PathBuf],
     tx: Sender<FileEvent>,
 ) -> Result<SensorHandle, SensorError> {
+    let health = SensorHealth::default();
+    let callback_health = health.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<NotifyEvent>| {
-        let event = match res {
-            Ok(e) => e,
-            Err(err) => {
-                tracing::warn!(error = %err, "notify 이벤트 오류");
-                return;
-            }
-        };
-        let Some(action) = map_action(&event.kind) else {
-            return;
-        };
-        for path in &event.paths {
-            let size = std::fs::metadata(path).ok().map(|m| m.len());
-            let file_event = FileEvent {
-                timestamp_ms: now_ms(),
-                pid: 0, // notify 한계: pid를 제공하지 않음.
-                path: path.to_string_lossy().into_owned(),
-                action,
-                size,
-                entropy: None, // 엔트로피는 파이프라인(agent)에서 계산.
-            };
-            if tx.blocking_send(file_event).is_err() {
-                // 수신측 종료 — 에이전트가 내려가는 중.
-                return;
-            }
-        }
+        handle_notify_event(res, &tx, &callback_health);
     })?;
-
     for path in paths {
         watcher.watch(path, RecursiveMode::Recursive)?;
         tracing::info!(path = %path.display(), backend = "notify", "감시 시작");
     }
+    health.start();
+    Ok(SensorHandle {
+        _backend: SensorBackend::Notify { _watcher: watcher },
+        health,
+    })
+}
 
-    Ok(SensorHandle::Notify(watcher))
+fn handle_notify_event(
+    res: notify::Result<NotifyEvent>,
+    tx: &Sender<FileEvent>,
+    health: &SensorHealth,
+) {
+    let event = match res {
+        Ok(e) => e,
+        Err(err) => {
+            health.error();
+            tracing::warn!(error = %err, "notify 이벤트 오류 — 보호 상태 저하");
+            return;
+        }
+    };
+    if event.need_rescan() {
+        health.overflow();
+        tracing::warn!("notify 재스캔 요청 — 커널 이벤트 유실 가능");
+    }
+    let Some(action) = map_action(&event.kind) else {
+        return;
+    };
+    for path in &event.paths {
+        let size = std::fs::metadata(path).ok().map(|m| m.len());
+        let file_event = FileEvent {
+            timestamp_ms: now_ms(),
+            pid: 0,
+            path: path.to_string_lossy().into_owned(),
+            action,
+            size,
+            entropy: None,
+            process: None,
+        };
+        if !health.deliver(tx, file_event) {
+            return;
+        }
+    }
 }
 
 fn map_action(kind: &EventKind) -> Option<FileAction> {
@@ -115,5 +161,27 @@ fn map_action(kind: &EventKind) -> Option<FileAction> {
         EventKind::Modify(ModifyKind::Metadata(_)) => Some(FileAction::Chmod),
         EventKind::Modify(_) => Some(FileAction::Modify),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notify_overflow_is_reported_even_without_a_file_action() {
+        let health = SensorHealth::default();
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let event = NotifyEvent::new(EventKind::Other).set_flag(notify::event::Flag::Rescan);
+        handle_notify_event(Ok(event), &tx, &health);
+        handle_notify_event(
+            Err(notify::Error::generic("테스트 수집 오류")),
+            &tx,
+            &health,
+        );
+        let snapshot = health.snapshot();
+        assert_eq!(snapshot.kernel_overflows, 1);
+        assert_eq!(snapshot.errors, 1);
+        assert_eq!(snapshot.delivered_events, 0);
     }
 }

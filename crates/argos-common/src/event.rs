@@ -27,6 +27,18 @@ pub struct FileEvent {
     pub size: Option<u64>,
     /// 파일 내용 샘플의 Shannon 엔트로피 (0.0 ~ 8.0).
     pub entropy: Option<f64>,
+    /// 수집 시점에 확인한 프로세스 맥락. 이전 이벤트·PID 미지원 센서는 None.
+    #[serde(default)]
+    pub process: Option<FileProcessContext>,
+}
+
+/// 파일 이벤트에 고정해 보관하는 프로세스 식별·승인 작업 매칭 근거.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileProcessContext {
+    pub uid: u32,
+    pub exe: String,
+    pub start_time_ticks: u64,
+    pub boot_id: String,
 }
 
 /// 프로세스 실행 이벤트 (요건서 4. 프로세스 감시).
@@ -38,7 +50,17 @@ pub struct ProcessEvent {
     pub timestamp_ms: u64,
     pub pid: Pid,
     pub ppid: Pid,
+    /// 실행 권한을 나타내는 유효 UID (/proc status Uid의 두 번째 값).
     pub uid: u32,
+    /// /proc/<pid>/stat의 시작 시각(부팅 이후 clock ticks). 미수집/이전 데이터는 None.
+    #[serde(default)]
+    pub start_time_ticks: Option<u64>,
+    /// /proc/sys/kernel/random/boot_id. PID와 시작 ticks의 재부팅 간 충돌을 구분한다.
+    #[serde(default)]
+    pub boot_id: Option<String>,
+    /// 관측된 실행 파일 경로. 폴링 사이 실행 변경 추적에 사용한다.
+    #[serde(default)]
+    pub exe: Option<String>,
     /// 커널 comm (프로세스 이름, 최대 15자).
     pub comm: String,
     /// 전체 명령행.

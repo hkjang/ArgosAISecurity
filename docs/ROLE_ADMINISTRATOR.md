@@ -41,7 +41,7 @@ detect_score = 40.0          # 탐지 생성 하한 점수 (40점)
 entropy_sample_bytes = 65536 # 엔트로피 실측 샘플 크기 (64KB)
 
 [response]
-auto_block = true            # 위험 임계 초과 시 프로세스 자동 차단
+auto_block = false           # 관찰·정책 재생 후 소수 서버에서 자동 차단 검증
 block_score = 80.0           # 자동 차단 발동 점수 (80점)
 ```
 
@@ -59,17 +59,18 @@ argos policy sign policy.toml --key-file signing.key
 
 전사 에이전트의 실시간 수집 인프라를 통제하기 위해 중앙 서버 설정을 조율합니다.
 
-1. **에이전트 토큰 인증 수립**:
-   - 중앙 서버(`argos-central`) 기동 시 에이전트 연동용 비밀 토큰을 고유 지정합니다:
+1. **관리자·에이전트별 토큰 인증 수립**:
+   - 조회용 관리자 토큰을 `ARGOS_CENTRAL_TOKEN` 환경변수로 설정하고, 관리자 토큰 및 다른 에이전트 토큰과 서로 다른 토큰을 `/etc/argos/agent-tokens.json`에 저장합니다. 파일 형식은 `{"agent-db-01":"<에이전트 전용 토큰>"}`입니다. 파일과 환경변수의 접근 권한을 관리자에게 제한합니다.
      ```bash
-     argos-central --listen 0.0.0.0:8420 --token ARGOS_SECURE_TOKEN_123!
+     argos-central --listen 0.0.0.0:8420 --agent-tokens /etc/argos/agent-tokens.json
      ```
+   - 운영 통신에는 별도 TLS 프록시로 HTTPS를 구성합니다. 인증 없는 로컬 개발은 `argos-central --development --listen 127.0.0.1:8420`으로 명시합니다.
 2. **에이전트 연동 활성화**:
    - 배포 대상 에이전트 노드들의 `argos.toml` 내에 중앙 제어 연결 정보를 등록합니다:
      ```toml
      [central]
-     url = "http://<중앙서버IP>:8420"
-     token = "ARGOS_SECURE_TOKEN_123!"
+     url = "https://<중앙서버TLS주소>"
+     token = "<agent-tokens.json의 agent-db-01 전용 토큰>"
      agent_id = "agent-db-01"            # 빈칸 시 호스트명 자동 매핑
      ```
-   - 등록 완료 시 에이전트가 생존 신호(`/api/v1/agents/register`)를 보내며 중앙 대시보드상에 실시간으로 표시되기 시작합니다.
+   - 에이전트가 `/api/v1/agents/register`로 등록한 뒤 `/api/v1/agents/heartbeat`로 생존·센서·재전송 상태를 보냅니다. 대시보드 조회에는 관리자 토큰을 입력합니다.

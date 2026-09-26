@@ -15,6 +15,12 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+mod simulation;
+pub use simulation::{
+    simulate, PolicySimulation, SimulationCoverage, SimulationDelta, SimulationError,
+    SimulationOptions, SimulationReport, SimulationTarget, SimulationTargetKey,
+};
+
 #[derive(Debug, thiserror::Error)]
 pub enum PolicyError {
     #[error("IO 오류 ({path}): {source}")]
@@ -29,6 +35,8 @@ pub enum PolicyError {
     InvalidSignature,
     #[error("정책 파일 형식 오류: {0}")]
     Parse(#[from] toml::de::Error),
+    #[error("정책 파일 UTF-8 오류: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
 }
 
 fn io_err(path: &Path, source: std::io::Error) -> PolicyError {
@@ -120,9 +128,12 @@ pub fn verify_file(policy_path: &Path, pub_hex: &str) -> Result<(), PolicyError>
 
 /// 서명 검증을 통과한 경우에만 정책을 파싱해 반환한다.
 pub fn load_verified(policy_path: &Path, pub_hex: &str) -> Result<Policy, PolicyError> {
-    verify_file(policy_path, pub_hex)?;
-    let text = std::fs::read_to_string(policy_path).map_err(|e| io_err(policy_path, e))?;
-    let policy: Policy = toml::from_str(&text)?;
+    // 검증한 바이트를 그대로 파싱한다. 검증 뒤 파일 교체로 정책이 바뀌면 안 된다.
+    let data = std::fs::read(policy_path).map_err(|e| io_err(policy_path, e))?;
+    let sig_path = sig_path_for(policy_path);
+    let sig = std::fs::read_to_string(&sig_path).map_err(|e| io_err(&sig_path, e))?;
+    verify_bytes(&data, &sig, pub_hex)?;
+    let policy: Policy = toml::from_str(std::str::from_utf8(&data)?)?;
     tracing::info!(version = policy.version, "서명 검증된 정책 로드");
     Ok(policy)
 }

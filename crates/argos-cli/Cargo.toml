@@ -2,6 +2,7 @@
 name = "argos-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [[bin]]
 name = "argos"
@@ -16,3 +17,5 @@ argos-brain.workspace = true
 argos-policy.workspace = true
 argos-response.workspace = true
 clap.workspace = true
+toml.workspace = true
+serde_json.workspace = true

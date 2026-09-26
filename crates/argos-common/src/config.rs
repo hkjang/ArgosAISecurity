@@ -34,6 +34,7 @@ pub struct AgentConfig {
     pub central: CentralConfig,
     pub policy: PolicyFileConfig,
     pub process_monitor: ProcessMonitorConfig,
+    pub ai: AiConfig,
 }
 
 impl Default for AgentConfig {
@@ -48,6 +49,34 @@ impl Default for AgentConfig {
             central: CentralConfig::default(),
             policy: PolicyFileConfig::default(),
             process_monitor: ProcessMonitorConfig::default(),
+            ai: AiConfig::default(),
+        }
+    }
+}
+
+/// 외부 API 또는 온프레미스 Ollama. 키 값은 설정 파일 대신 환경변수에서 읽는다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiConfig {
+    pub provider: String,
+    /// API 전체 URL. 비어 있으면 제공자 기본 주소.
+    pub endpoint: String,
+    /// 비어 있으면 ARGOS_AI_MODEL 환경변수 사용.
+    pub model: String,
+    pub api_key_env: String,
+    pub timeout_secs: u64,
+    pub evidence_limit: usize,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            provider: "anthropic".into(),
+            endpoint: String::new(),
+            model: String::new(),
+            api_key_env: String::new(),
+            timeout_secs: 60,
+            evidence_limit: 200,
         }
     }
 }
@@ -103,6 +132,23 @@ pub struct DetectionConfig {
     pub entropy_sample_bytes: usize,
     /// 오탐 방지: 점수 계산에서 제외할 경로 prefix (백업, 로그 로테이션 등).
     pub exclude_paths: Vec<PathBuf>,
+    /// 시간·경로·실행 파일·계정이 모두 일치할 때 지정 규칙만 조정한다.
+    pub approved_changes: Vec<ApprovedChange>,
+    /// 변경·삭제·이름 변경을 고위험 신호로 취급하는 미끼 파일의 정확한 경로.
+    pub canary_paths: Vec<PathBuf>,
+}
+
+/// 승인된 작업. 파일 변경 이벤트의 불변 프로세스 맥락이 있어야 적용한다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovedChange {
+    pub id: String,
+    pub valid_from_ms: u64,
+    pub valid_until_ms: u64,
+    pub paths: Vec<PathBuf>,
+    pub exe: PathBuf,
+    pub uid: u32,
+    /// 현재 지원하는 조정: behavior.ransomware_pattern의 해당 이벤트 증거 제외.
+    pub adjusted_rules: Vec<String>,
 }
 
 impl Default for DetectionConfig {
@@ -115,6 +161,8 @@ impl Default for DetectionConfig {
             detect_score: 40.0,
             entropy_sample_bytes: 64 * 1024,
             exclude_paths: Vec::new(),
+            approved_changes: Vec::new(),
+            canary_paths: Vec::new(),
         }
     }
 }
@@ -151,6 +199,10 @@ pub struct BackupConfig {
     pub keep_versions: usize,
     /// 에이전트 시작 시 감시 경로의 기존 파일을 1회 베이스라인 백업.
     pub baseline_on_start: bool,
+    /// 탐지 경로와 분리된 백업 작업 큐 상한.
+    pub queue_capacity: usize,
+    /// 백업 작업 처리 예산(bytes/sec). 0은 허용하지 않는다.
+    pub io_bytes_per_sec: u64,
 }
 
 impl Default for BackupConfig {
@@ -165,12 +217,14 @@ impl Default for BackupConfig {
             max_file_bytes: 50 * 1024 * 1024,
             keep_versions: 5,
             baseline_on_start: true,
+            queue_capacity: 256,
+            io_bytes_per_sec: 10 * 1024 * 1024,
         }
     }
 }
 
 /// 중앙관리 서버 연동 설정 (요건서 15장).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CentralConfig {
     /// 비어 있으면 중앙 서버 연동을 하지 않는다 (standalone 모드).
@@ -179,6 +233,30 @@ pub struct CentralConfig {
     pub token: String,
     /// 비어 있으면 hostname을 사용한다.
     pub agent_id: String,
+}
+
+impl std::fmt::Debug for CentralConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CentralConfig")
+            .field("url", &self.url)
+            .field("token", &"[REDACTED]")
+            .field("agent_id", &self.agent_id)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::*;
+
+    #[test]
+    fn agent_debug_redacts_central_token() {
+        let mut config = AgentConfig::default();
+        config.central.token = "never-log-this-secret".into();
+        let log = format!("{config:?}");
+        assert!(!log.contains("never-log-this-secret"));
+        assert!(log.contains("[REDACTED]"));
+    }
 }
 
 impl Default for CentralConfig {

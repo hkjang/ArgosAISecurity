@@ -24,9 +24,9 @@ Linux 전용 코드는 `#[cfg(target_os = "linux")]`로 격리할 것 — cfg �
 - `crates/argos-response` — 대응 실행. pid 0 차단은 반드시 거부 (kill(0)은 프로세스 그룹 전체 시그널). 네트워크 격리는 isolate.rs (iptables ARGOS_ISOLATE 체인, 명령 생성은 OS 무관해 단위 테스트 가능, 실행만 cfg-gated).
 - `crates/argos-recovery` — 내용 주소(SHA-256) 백업 + 해시 검증 복구. 백업 dir는 감시 경로 밖에 둘 것.
 - `crates/argos-policy` — Ed25519 정책 서명/검증. 서명 대상은 파일 바이트 그대로(정규화 없음). 검증 실패 시 정책 미적용이 원칙 (요건서 11장).
-- `crates/argos-brain` — Claude Messages API 직접 HTTP 호출 (모델 claude-opus-4-8, 키는 ANTHROPIC_API_KEY). 프롬프트에 storage의 실제 이벤트만 근거로 제공 — hallucination 방지 원칙.
-- `crates/argos-central` — axum 중앙 서버 (등록/수집/조회). 인증: Bearer 공유 토큰 → Phase 4 mTLS.
-- `crates/argos-agent` — 데몬 바이너리. 파이프라인: sensor → entropy → store → backup → detect → respond/report. 중앙 보고는 reporter.rs의 전용 std 스레드 (tokio 안에서 reqwest blocking 금지).
+- `crates/argos-brain` — Anthropic/Ollama HTTP 호출 (모델·주소·제공자는 [ai] 설정, 키는 환경변수). 프롬프트에 storage의 실제 이벤트만 근거로 제공 — hallucination 방지 원칙.
+- `crates/argos-central` — axum 중앙 서버 (등록/수집/조회). 인증: 관리자 조회/개별 에이전트 수집 토큰 분리. mTLS는 후속.
+- `crates/argos-agent` — 데몬 바이너리. 파이프라인: sensor → entropy → detect/respond → audit/store → 별도 backup/report 작업자. 중앙 보고는 SQLite outbox와 reporter.rs의 전용 std 스레드 (tokio 안에서 reqwest blocking 금지).
 - `crates/argos-cli` — `argos` 바이너리. DB read-only 조회 + restore/explain. 에이전트 상태 변경 금지.
 
 ## 컨벤션
