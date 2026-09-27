@@ -533,3 +533,30 @@ fn lock_probe_child() {
         std::env::var("ARGOS_VAULT_LOCK_EXPECTED").unwrap() == "locked"
     );
 }
+
+#[test]
+fn normal_uploads_preserve_a_separate_physical_revocation_cushion() {
+    let mut fixture = Fixture::new();
+    // 실제 디스크를 채우지 않고 측정 가용량보다 큰 쿠션으로 admission 경계를 시험한다.
+    fixture.config.capacity.revocation_reserved_free_bytes = u64::MAX;
+    let server = HttpServer::start(router(fixture.config.clone()).unwrap());
+    assert_eq!(
+        server
+            .post(&fixture.config, "host-a", b"new")
+            .status()
+            .as_u16(),
+        507
+    );
+    assert!(server.usage(&fixture.config).new_uploads_blocked);
+    assert_eq!(server.usage(&fixture.config).total.objects, 0);
+    drop(server);
+    // 논리 취소 예약의 명시적 비활성화는 v0.6의 min_free=0 동작으로 돌아간다.
+    fixture.config.capacity.revocation_max_objects = 0;
+    let server = HttpServer::start(router(fixture.config.clone()).unwrap());
+    assert!(server
+        .post(&fixture.config, "host-a", b"new")
+        .status()
+        .is_success());
+    assert_eq!(server.usage(&fixture.config).normal_usage.objects, 1);
+    assert_eq!(server.usage(&fixture.config).revocation_usage.objects, 0);
+}

@@ -1,4 +1,4 @@
-/** v0.6.0 landing page copy and illustrative CLI workflows. No backend calls. */
+/** v0.7.0 landing page copy and illustrative CLI workflows. No backend calls. */
 const i18n = {
   "ko": {
     "nav_features": "핵심 기능",
@@ -6,12 +6,12 @@ const i18n = {
     "nav_architecture": "아키텍처",
     "nav_recovery": "복구 메커니즘",
     "nav_faq": "자주 묻는 질문",
-    "hero_badge": "v0.6.0 · Linux 보안 플랫폼",
+    "hero_badge": "v0.7.0 · Linux 보안 플랫폼",
     "hero_title": "차단과 복구를 검증하는 Linux 보안<br><span class=\"text-gradient\">Argos AI Security</span>",
-    "hero_subtitle": "최대 1GiB 백업을 나눠 보관하고, 원본 서버와 로컬 DB 없이 새 호스트에서 복구를 시험합니다. 현재 원격 정상 판정과 청크·전체 해시를 함께 확인합니다.",
+    "hero_subtitle": "등록한 번들의 전송과 게시를 중단 후 자동 재개합니다. 미승인 백업은 격리 시험으로 먼저 확인하고, 시험 결과와 운영 복구 승인을 구분합니다.",
     "btn_quickstart": "빠른 시작 가이드",
     "btn_demo": "CLI 데모 체험",
-    "metric_time": "v0.6.0",
+    "metric_time": "v0.7.0",
     "metric_time_label": "공개 릴리즈",
     "metric_recovery": "16 MiB",
     "metric_recovery_label": "최대 1GiB 백업 분할 보관",
@@ -25,12 +25,12 @@ const i18n = {
     "feat1_desc": "notify/fanotify와 /proc 관측, 선택한 다중 시간 구간과 Linux 설정 의미를 분석합니다. 별도 경로·마운트 검사는 공백을 표시하고 시험 파일로 DB 수신을 확인합니다.",
     "feat2_title": "내용 표본과 엔트로피",
     "feat2_desc": "기본 앞부분 64 KiB를 분석하며, 선택 기능으로 읽기 예산을 앞·중간·끝에 나눕니다. 이전 관측과 파일 유형을 비교하지만 파일 전체 검사나 공격 판정을 보증하지는 않습니다.",
-    "feat3_title": "원본 서버 없는 복구 시험",
-    "feat3_desc": "정상본 미리보기·사건 보존과 함께 원격 복구 묶음을 제공합니다. 관리자 정상 판정, 청크·전체 해시, 내장 계획의 DB 시험을 확인하며 로컬 시험 보고서는 무서명입니다.",
+    "feat3_title": "승인 전 격리 복구 시험",
+    "feat3_desc": "unknown 백업을 격리해 DB 검사와 원격 판정을 확인합니다. 시험 성공이 운영 승인이 되지는 않으며, 현재 good 판정을 확인한 일반 복구 경로를 별도로 유지합니다.",
     "feat4_title": "서명 정책·사전 검증",
     "feat4_desc": "서명·버전·유효기간·대상·키 ID를 검사합니다. 저장 이벤트로 정책을 비교하고 승인 예외의 매칭·만료·범위와 예외 제거 영향을 확인합니다.",
     "feat5_title": "근거 기반 AI·증거 패키지",
-    "feat5_desc": "AI 인용을 실제 근거와 대조합니다. 작업 임대·완료 이력·예약 전송으로 보관 큐를 운영하며 서버는 용량을 제한합니다. 사건 증거 3파일의 자동 원자 묶음은 후속입니다.",
+    "feat5_desc": "AI 인용을 실제 근거와 대조하고, 구성 목록까지 영속 큐에 등록해 게시를 자동 재개합니다. 서버는 취소 기록 예산을 구분하고 확인 가능한 번들별 장애 영향을 제한합니다.",
     "feat6_title": "프로세스 차단·네트워크 격리",
     "feat6_desc": "자동 차단을 켠 Linux 호스트에서 PID·시작 시각·부팅 ID를 확인하고 종료 결과를 기록합니다. 별도 격리 명령은 IPv4/IPv6의 명시적 관리 연결만 허용합니다.",
     "sec_cli_title": "CLI 사용 흐름 살펴보기",
@@ -58,12 +58,12 @@ const i18n = {
     "faq3_q": "Q3. AI에 어떤 데이터가 전달되나요?",
     "faq3_a": "설정한 제공자에 저장된 이벤트·탐지·프로세스·대응 근거를 전달합니다. 파일 본문을 직접 보내지는 않지만 경로·명령행·계정 정보에도 민감한 값이 있을 수 있습니다. Anthropic은 외부 API이며, Ollama는 지정한 사내 주소로 구성할 수 있습니다. 모델 ID와 조회 범위를 확인하세요.",
     "faq4_q": "Q4. 어떤 환경에서 사용할 수 있나요?",
-    "faq4_a": "v0.6.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다.",
+    "faq4_a": "v0.7.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다.",
     "footer_tagline": "차단·정상본 복구·사건 근거를 검증하는 Linux 보안 플랫폼",
     "footer_quick_inquiry": "문의 요청:",
     "footer_rights": "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0.",
     "nav_docs": "문서",
-    "btn_download": "v0.6.0 다운로드"
+    "btn_download": "v0.7.0 다운로드"
   },
   "en": {
     "nav_features": "Features",
@@ -71,12 +71,12 @@ const i18n = {
     "nav_architecture": "Architecture",
     "nav_recovery": "Recovery",
     "nav_faq": "FAQ",
-    "hero_badge": "v0.6.0 · Linux security platform",
+    "hero_badge": "v0.7.0 · Linux security platform",
     "hero_title": "Linux security with verifiable response and recovery<br><span class=\"text-gradient\">Argos AI Security</span>",
-    "hero_subtitle": "Store backups up to 1 GiB in chunks and test recovery on a new host without the original server or local database. Verify current remote approval, chunk hashes and the complete file hash.",
+    "hero_subtitle": "Resume registered bundle uploads and publication after interruption. Test unapproved backups in isolation, keeping drill results separate from authorization to restore.",
     "btn_quickstart": "Quick Start Guide",
     "btn_demo": "Interactive CLI Demo",
-    "metric_time": "v0.6.0",
+    "metric_time": "v0.7.0",
     "metric_time_label": "Published release",
     "metric_recovery": "16 MiB",
     "metric_recovery_label": "Chunks for backups up to 1 GiB",
@@ -90,12 +90,12 @@ const i18n = {
     "feat1_desc": "Combine notify/fanotify and /proc observations with optional time windows and Linux configuration analysis. Check path and mount gaps separately, and confirm a probe event reaches the database.",
     "feat2_title": "Content samples and entropy",
     "feat2_desc": "The default reads up to 64 KiB from the beginning. Optional sampling divides a read budget across the beginning, middle and end and compares prior observations and file types. It does not inspect every byte.",
-    "feat3_title": "Recovery without the original server",
-    "feat3_desc": "Keep reviewed previews and incident retention, and recover remote backup bundles. Check current administrator approval, chunk and full hashes, and database drills from the embedded plan. Local drill reports remain unsigned.",
+    "feat3_title": "Isolated drills before approval",
+    "feat3_desc": "Test unknown backups in isolation and recheck remote approval. A successful drill does not authorize a production restore. Normal recovery continues to require a current good review.",
     "feat4_title": "Signed policies and preflight comparison",
     "feat4_desc": "Check signatures, versions, validity, targets and key IDs. Replay recorded events to compare policies and examine exception matches, expiry, scope and removal impact.",
     "feat5_title": "Evidence-based AI and export",
-    "feat5_desc": "Check AI citations against recorded evidence. Operate the upload queue with leases, receipt archives and scheduled delivery while enforcing storage limits. Atomic publication of three-file incident packages remains future work.",
+    "feat5_desc": "Validate AI citations against evidence and persist bundle manifests with upload jobs for automatic publication. Reserve capacity for revocation records and isolate attributable bundle failures.",
     "feat6_title": "Process response and network isolation",
     "feat6_desc": "With blocking enabled on Linux, verify PID, start time and boot ID before termination and record the result. Separate IPv4/IPv6 isolation commands allow only explicit management connections.",
     "sec_cli_title": "Explore the CLI workflow",
@@ -123,12 +123,12 @@ const i18n = {
     "faq3_q": "Q3. Which data is sent to the AI provider?",
     "faq3_a": "Stored file, detection, process and response evidence goes to the configured provider. File bodies are not sent directly, but paths, command lines and account information can still contain sensitive values. Anthropic uses an external API; Ollama can use your on-premises endpoint. Configure the model ID and review the query scope.",
     "faq4_q": "Q4. Which environments are supported?",
-    "faq4_a": "The v0.6.0 binaries target GNU/Linux x86_64 with glibc 2.39 or later. Source builds require Rust 1.86 or later. notify also provides a development path for other operating systems, but this release supplies no Windows/macOS binaries or execution validation. fanotify, process response and isolation need Linux support and permissions.",
+    "faq4_a": "The v0.7.0 binaries target GNU/Linux x86_64 with glibc 2.39 or later. Source builds require Rust 1.86 or later. notify also provides a development path for other operating systems, but this release supplies no Windows/macOS binaries or execution validation. fanotify, process response and isolation need Linux support and permissions.",
     "footer_tagline": "A Linux platform for verifiable response, reviewed recovery and incident evidence",
     "footer_quick_inquiry": "Inquiry:",
     "footer_rights": "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0.",
     "nav_docs": "Docs",
-    "btn_download": "Download v0.6.0"
+    "btn_download": "Download v0.7.0"
   }
 };
 
@@ -138,7 +138,7 @@ const cliCommands = {
   "restore": "argos restore /srv/data/report.txt --list",
   "explain": "argos ask --from-ms 1790380800000 --to-ms 1790467200000 \"Review this period\"",
   "evidence": "argos evidence-export 42 --out /secure/incident-42",
-  "bundle": "argos vault --vault-config vault-admin.toml bundle test --agent-id orders-host --id BUNDLE_ID --out /secure/new-drill"
+  "bundle": "argos vault --vault-config vault-admin.toml bundle test --preapproval --agent-id orders-host --id BUNDLE_ID --out /secure/new-drill"
 };
 const cliExamples = {
   "ko": {
@@ -147,7 +147,7 @@ const cliExamples = {
     "restore": "[가상 버전 목록 발췌]\nID   TRUST\n23   unverified\n19   known-good  (운영자 검토 근거가 있는 버전)\n\n$ argos restore /srv/data/report.txt --version 23 --preview /tmp/report-preview.txt\n미검토 버전은 새 경로에서 먼저 검토합니다.\n\n$ argos restore /srv/data/report.txt\n기본 복구는 최신 정상 판정 버전을 선택합니다.\n백업 시각이나 해시 일치만으로 정상본이 되지 않습니다.",
     "explain": "[기간을 명시한 AI 조사 흐름]\n설정한 Anthropic/Ollama 제공자와 명시한 모델 ID를 사용합니다.\n호스트 범위는 현재 설정의 로컬 이벤트 DB입니다.\n종류별 전체/조회 건수와 누락을 표시하고 근거 ID를 전달합니다.\n\n답변은 원본 근거와 대조해야 합니다.\n이 데모는 AI를 호출하지 않으며 실제 조사 결과를 표시하지 않습니다.",
     "evidence": "[새 디렉터리에 작성하는 증거 패키지]\nevidence.json  근거·대응 결과·조회 범위와 누락\npolicy.json    내보내기 시점의 마지막 수락 정책 또는 로컬 설정\nmanifest.json  파일 목록·크기·SHA-256·마스킹 범위\n\n$ argos evidence-verify /secure/incident-42\n파일과 manifest의 일치 여부를 검증합니다.\n기본값은 민감 필드를 가리며, 해시 검증은 발급자 진위 증명이 아닙니다.",
-    "bundle": "[원격 복구 시험의 가상 흐름]\n완료·현재 good 확인 → 청크 재조립 → 내장 DB 계획 시험\n보고서·백업 해시 대조 → 원격 현재 판정 재조회\n\n원본 에이전트 DB를 사용하지 않습니다.\nunknown/revoked는 일반 복구·시험에서 거부합니다.\n서버 검토는 서명되지만 report_authenticated=false입니다.\n실제 명령 결과는 새 경로의 bundle-test.json에서 확인합니다."
+    "bundle": "[승인 전 격리 시험의 가상 흐름]\n완료·현재 unknown 확인 → 청크 재조립 → 격리 DB 시험\n보고서·백업 해시 대조 → 원격 현재 판정 재조회\n\n원본 에이전트 DB를 사용하지 않습니다.\n시험 성공 후에도 recommended=false입니다. 별도 승인이 필요합니다.\n서버 검토는 서명되지만 report_authenticated=false입니다.\n실제 명령 결과는 새 경로의 bundle-test.json에서 확인합니다."
   },
   "en": {
     "status": "[Translated excerpt using the example configuration]\nSensor        : Notify\nAuto-block    : Disabled (detection only)\nCentral       : Standalone\n\nCheck actual heartbeat and protection metrics from your agent.\nNo detections and interrupted monitoring are different states.",
@@ -155,7 +155,7 @@ const cliExamples = {
     "restore": "[Illustrative version list]\nID   TRUST\n23   unverified\n19   known-good  (explicitly reviewed by an operator)\n\n$ argos restore /srv/data/report.txt --version 23 --preview /tmp/report-preview.txt\nReview the unverified version in a new file first.\n\n$ argos restore /srv/data/report.txt\nDefault restore selects the latest known-good version.\nAn earlier timestamp or matching hash alone does not establish trust.",
     "explain": "[AI investigation with an explicit time range]\nUses the configured Anthropic/Ollama provider and explicit model ID.\nThe host scope is the local event DB in your configuration.\nIncludes per-source counts, missing coverage and evidence IDs.\n\nCompare the answer with the underlying evidence.\nThis demo makes no AI calls and displays no real incident findings.",
     "evidence": "[Evidence package in a new directory]\nevidence.json  Evidence, response records and query coverage\npolicy.json    Last accepted policy or local configuration at export\nmanifest.json  File list, sizes, SHA-256 and redaction scope\n\n$ argos evidence-verify /secure/incident-42\nChecks consistency between files and the manifest.\nSensitive fields are redacted by default; hashes do not authenticate origin.",
-    "bundle": "[Illustrative remote recovery drill]\nCurrent good approval and completion → reassemble chunks → database drill\nVerify report and backup hashes → recheck current remote approval\n\nThe original agent database is not used.\nUnknown or revoked bundles cannot run normal recovery or drills.\nServer reviews are signed; report_authenticated remains false.\nRead the actual result in bundle-test.json in the new output directory."
+    "bundle": "[Illustrative preapproval drill]\nComplete and currently unknown → reassemble chunks → isolated database drill\nVerify report and backup hashes → recheck current remote approval\n\nThe original agent database is not used.\nA passing preapproval drill keeps recommended=false. Approval is a separate action.\nServer reviews are signed; report_authenticated remains false.\nRead the actual result in bundle-test.json in the new output directory."
   }
 };
 

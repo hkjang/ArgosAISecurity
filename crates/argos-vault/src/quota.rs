@@ -15,6 +15,13 @@ pub struct CapacityConfig {
     pub agent_max_bytes: u64,
     pub agent_max_objects: u64,
     pub min_free_bytes: u64,
+    /// 일반 max_*와 별개인 관리자 취소 전용 논리 예산.
+    pub revocation_max_bytes: u64,
+    pub revocation_max_objects: u64,
+    pub revocation_agent_max_bytes: u64,
+    pub revocation_agent_max_objects: u64,
+    /// 일반 쓰기만 추가로 남기는 물리 여유. 공간 사전 할당은 아니다.
+    pub revocation_reserved_free_bytes: u64,
     pub max_scan_entries: usize,
     pub max_tracked_agents: usize,
     pub agent_overrides: BTreeMap<String, AgentCapacityLimit>,
@@ -27,6 +34,11 @@ impl Default for CapacityConfig {
             agent_max_bytes: 10 * 1024 * 1024 * 1024,
             agent_max_objects: 100_000,
             min_free_bytes: 1024 * 1024 * 1024,
+            revocation_max_bytes: 8 * 1024 * 1024,
+            revocation_max_objects: 1000,
+            revocation_agent_max_bytes: 1024 * 1024,
+            revocation_agent_max_objects: 100,
+            revocation_reserved_free_bytes: 128 * 1024 * 1024,
             max_scan_entries: 2_100_000,
             max_tracked_agents: 4096,
             agent_overrides: BTreeMap::new(),
@@ -48,6 +60,8 @@ pub struct ObjectUsage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentCapacityUsage {
     pub usage: ObjectUsage,
+    pub normal_usage: ObjectUsage,
+    pub revocation_usage: ObjectUsage,
     pub limits: AgentCapacityLimit,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,11 +74,14 @@ pub struct FilesystemCapacity {
 pub struct CapacityUsage {
     pub limits: CapacityConfig,
     pub total: ObjectUsage,
+    pub normal_usage: ObjectUsage,
+    pub revocation_usage: ObjectUsage,
     pub agents: BTreeMap<String, AgentCapacityUsage>,
     pub filesystem: FilesystemCapacity,
     pub reconstruction_complete: bool,
     pub storage_consistent: bool,
-    /// 전역 용량/정합성/스캔/파일시스템 여유 조건상 신규 쓰기가 중단되었는지 나타낸다.
+    /// 전역 일반 용량/정합성/스캔/물리 쿠션 조건상 신규 일반 쓰기가 중단되었는지 나타낸다.
+    /// 별도 예산과 기본 물리 여유가 있는 관리자 취소까지 막힌다는 뜻은 아니다.
     /// false여도 개별 요청은 전역·에이전트 한도에 따라 거부될 수 있다.
     pub new_uploads_blocked: bool,
     pub reasons: Vec<String>,
@@ -176,6 +193,9 @@ pub(crate) struct CapacityState {
     admission_rejections: u64,
     _writer: WriterLock,
     pub(crate) bundle_control_objects: u64,
+    pub(crate) bundle_control_owners: BTreeMap<(String, String), u64>,
+    revocations: ObjectUsage,
+    agent_revocations: BTreeMap<String, ObjectUsage>,
 }
 impl CapacityState {
     pub(crate) fn open(
@@ -203,6 +223,9 @@ impl CapacityState {
             admission_rejections: 0,
             _writer: writer,
             bundle_control_objects: 0,
+            bundle_control_owners: BTreeMap::new(),
+            revocations: ObjectUsage::default(),
+            agent_revocations: BTreeMap::new(),
         };
         for agent in configured_agents {
             if state.agents.len() >= state.limits.max_tracked_agents {
@@ -315,7 +338,21 @@ impl CapacityState {
                         return Err("증명과 객체 메타데이터 불일치".into());
                     }
                     if receipt.receipt.kind.starts_with("bundle-") {
-                        self.bundle_control_objects += 1;
+                        let bytes =
+                            read_bounded(&object.path(), crate::bundle::MAX_MANIFEST_BYTES)?;
+                        verify_body(&bytes, &receipt)?;
+                        let (bundle, revoked) = crate::bundle::control_identity(
+                            &receipt.receipt.kind,
+                            &bytes,
+                            &name,
+                            key_id,
+                            &public,
+                        )?;
+                        self.note_control(&name, &bundle)?;
+                        if revoked && self.revocation_enabled() {
+                            self.add_revocation(&name, metadata.len());
+                            self.mark_revocation_receipted(&name);
+                        }
                     }
                     Ok(())
                 })();
@@ -387,38 +424,118 @@ impl CapacityState {
         current.objects = agent_objects;
         Ok(())
     }
+    pub(crate) fn note_control(&mut self, agent: &str, bundle: &str) -> Result<()> {
+        let key = (agent.to_owned(), bundle.to_owned());
+        if !self.bundle_control_owners.contains_key(&key)
+            && self.bundle_control_owners.len() >= 10000
+        {
+            self.inconsistent("bundle_owner_tracking_limit");
+            return Err("번들 귀속 계수 상한".into());
+        }
+        *self.bundle_control_owners.entry(key).or_default() += 1;
+        self.bundle_control_objects += 1;
+        Ok(())
+    }
+    fn revocation_enabled(&self) -> bool {
+        self.limits.revocation_max_bytes > 0
+            && self.limits.revocation_max_objects > 0
+            && self.limits.revocation_agent_max_bytes > 0
+            && self.limits.revocation_agent_max_objects > 0
+    }
+    fn add_revocation(&mut self, agent: &str, bytes: u64) {
+        self.revocations.logical_bytes += bytes;
+        self.revocations.objects += 1;
+        let usage = self.agent_revocations.entry(agent.to_owned()).or_default();
+        usage.logical_bytes += bytes;
+        usage.objects += 1;
+    }
+    pub(crate) fn mark_revocation_receipted(&mut self, agent: &str) {
+        if self.revocation_enabled() {
+            self.revocations.receipted_objects += 1;
+            self.agent_revocations
+                .entry(agent.to_owned())
+                .or_default()
+                .receipted_objects += 1;
+        }
+    }
     pub(crate) fn reserve(
         &mut self,
         agent: &str,
         bytes: u64,
     ) -> std::result::Result<(), CapacityRejection> {
-        let result = self.admit(agent, bytes);
+        self.reserve_for(agent, bytes, false)
+    }
+    pub(crate) fn reserve_revocation(
+        &mut self,
+        agent: &str,
+        bytes: u64,
+    ) -> std::result::Result<(), CapacityRejection> {
+        self.reserve_for(agent, bytes, true)
+    }
+    fn reserve_for(
+        &mut self,
+        agent: &str,
+        bytes: u64,
+        revocation: bool,
+    ) -> std::result::Result<(), CapacityRejection> {
+        let result = self.admit(agent, bytes, revocation && self.revocation_enabled());
         if result.is_err() {
             self.admission_rejections = self.admission_rejections.saturating_add(1);
         }
         result
     }
-    fn admit(&mut self, agent: &str, bytes: u64) -> std::result::Result<(), CapacityRejection> {
+    fn admit(
+        &mut self,
+        agent: &str,
+        bytes: u64,
+        revocation: bool,
+    ) -> std::result::Result<(), CapacityRejection> {
         if !self.storage_consistent || !self.reconstruction_complete {
             return Err(CapacityRejection("storage_accounting_incomplete"));
         }
         let Some(current) = self.agents.get(agent) else {
             return Err(CapacityRejection("untracked_agent"));
         };
-        let agent_limit = self.agent_limit(agent);
-        if self.total.logical_bytes >= self.limits.global_max_bytes
-            || self
-                .total
+        let agent_reserved = self
+            .agent_revocations
+            .get(agent)
+            .cloned()
+            .unwrap_or_default();
+        let (total, current, global_bytes, global_objects, agent_limit) = if revocation {
+            (
+                self.revocations.clone(),
+                agent_reserved,
+                self.limits.revocation_max_bytes,
+                self.limits.revocation_max_objects,
+                AgentCapacityLimit {
+                    max_bytes: self.limits.revocation_agent_max_bytes,
+                    max_objects: self.limits.revocation_agent_max_objects,
+                },
+            )
+        } else {
+            (
+                subtract_usage(&self.total, &self.revocations),
+                subtract_usage(current, &agent_reserved),
+                self.limits.global_max_bytes,
+                self.limits.global_max_objects,
+                self.agent_limit(agent),
+            )
+        };
+        if total.logical_bytes >= global_bytes
+            || total
                 .logical_bytes
                 .checked_add(bytes)
-                .is_none_or(|v| v > self.limits.global_max_bytes)
-            || self
-                .total
+                .is_none_or(|v| v > global_bytes)
+            || total
                 .objects
                 .checked_add(1)
-                .is_none_or(|v| v > self.limits.global_max_objects)
+                .is_none_or(|v| v > global_objects)
         {
-            return Err(CapacityRejection("global_limit"));
+            return Err(CapacityRejection(if revocation {
+                "revocation_global_limit"
+            } else {
+                "global_limit"
+            }));
         }
         if current.logical_bytes >= agent_limit.max_bytes
             || current
@@ -430,25 +547,39 @@ impl CapacityState {
                 .checked_add(1)
                 .is_none_or(|v| v > agent_limit.max_objects)
         {
-            return Err(CapacityRejection("agent_limit"));
+            return Err(CapacityRejection(if revocation {
+                "revocation_agent_limit"
+            } else {
+                "agent_limit"
+            }));
         }
-        if self.limits.min_free_bytes > 0 {
-            let free = self._writer.free_space();
+        let extra = if !revocation && self.revocation_enabled() {
+            self.limits.revocation_reserved_free_bytes
+        } else {
+            0
+        };
+        if self.limits.min_free_bytes > 0 || extra > 0 {
             let required = self
                 .limits
                 .min_free_bytes
-                .checked_add(bytes)
+                .checked_add(extra)
+                .and_then(|v| v.checked_add(bytes))
                 .and_then(|v| v.checked_add(METADATA_MARGIN));
-            if free
+            if self
+                ._writer
+                .free_space()
                 .available_bytes
                 .zip(required)
-                .is_none_or(|(free, required)| free < required)
+                .is_none_or(|(free, needed)| free < needed)
             {
                 return Err(CapacityRejection("filesystem_free_floor_or_unavailable"));
             }
         }
         self.add_usage(agent, bytes)
             .map_err(|_| CapacityRejection("accounting_overflow"))?;
+        if revocation {
+            self.add_revocation(agent, bytes);
+        }
         Ok(())
     }
     pub(crate) fn mark_receipted(&mut self, agent: &str) {
@@ -462,15 +593,22 @@ impl CapacityState {
     }
     pub(crate) fn usage(&self) -> CapacityUsage {
         let filesystem = self._writer.free_space();
-        let floor_blocked = self.limits.min_free_bytes > 0
+        let extra = if self.revocation_enabled() {
+            self.limits.revocation_reserved_free_bytes
+        } else {
+            0
+        };
+        let floor_blocked = (self.limits.min_free_bytes > 0 || extra > 0)
             && filesystem.available_bytes.is_none_or(|free| {
                 self.limits
                     .min_free_bytes
-                    .checked_add(METADATA_MARGIN)
+                    .checked_add(extra)
+                    .and_then(|v| v.checked_add(METADATA_MARGIN))
                     .is_none_or(|needed| free < needed)
             });
-        let global_blocked = self.total.logical_bytes >= self.limits.global_max_bytes
-            || self.total.objects >= self.limits.global_max_objects;
+        let normal = subtract_usage(&self.total, &self.revocations);
+        let global_blocked = normal.logical_bytes >= self.limits.global_max_bytes
+            || normal.objects >= self.limits.global_max_objects;
         let mut reasons = self.reasons.clone();
         if global_blocked {
             reasons.push("global_capacity_reached".into());
@@ -481,6 +619,8 @@ impl CapacityState {
         CapacityUsage {
             limits: self.limits.clone(),
             total: self.total.clone(),
+            normal_usage: normal,
+            revocation_usage: self.revocations.clone(),
             agents: self
                 .agents
                 .iter()
@@ -489,6 +629,15 @@ impl CapacityState {
                         id.clone(),
                         AgentCapacityUsage {
                             usage: usage.clone(),
+                            normal_usage: subtract_usage(
+                                usage,
+                                &self.agent_revocations.get(id).cloned().unwrap_or_default(),
+                            ),
+                            revocation_usage: self
+                                .agent_revocations
+                                .get(id)
+                                .cloned()
+                                .unwrap_or_default(),
                             limits: self.agent_limit(id),
                         },
                     )
@@ -504,5 +653,15 @@ impl CapacityState {
             reasons,
             admission_rejections: self.admission_rejections,
         }
+    }
+}
+
+fn subtract_usage(total: &ObjectUsage, reserved: &ObjectUsage) -> ObjectUsage {
+    ObjectUsage {
+        logical_bytes: total.logical_bytes.saturating_sub(reserved.logical_bytes),
+        objects: total.objects.saturating_sub(reserved.objects),
+        receipted_objects: total
+            .receipted_objects
+            .saturating_sub(reserved.receipted_objects),
     }
 }

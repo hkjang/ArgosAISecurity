@@ -145,6 +145,64 @@ fn stable_snapshot_survives_source_change_and_only_verified_ack_removes_it() {
         .any(|w| w == config.upload_token.as_bytes()));
 }
 
+fn pending_reenqueue_refuses_broken_snapshot(remove: bool) {
+    let fixture = Fixture::new();
+    let config = fixture.config("http://127.0.0.1:1");
+    let queued = enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    let path = snapshot(&fixture.queue(), &queued.id).unwrap();
+    let original = fs::read(&fixture.source).unwrap();
+    if remove {
+        fs::remove_file(&path).unwrap();
+    } else {
+        fs::write(&path, vec![0x85; original.len()]).unwrap();
+    }
+    let db = fs::read(fixture.queue().join(DB)).unwrap();
+    assert!(enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .is_err());
+    assert_eq!(fs::read(fixture.queue().join(DB)).unwrap(), db);
+    assert_eq!(fs::read(&fixture.source).unwrap(), original);
+    assert_eq!(status(&fixture.queue()).unwrap().pending_items, 1);
+    assert_eq!(item(&fixture.queue(), &queued.id).unwrap().attempts, 0);
+    // 운영자가 정상 본문을 복구한 뒤에는 기존 ID를 다시 반환할 수 있다.
+    if !remove {
+        fs::remove_file(&path).unwrap();
+    }
+    write_new(&path, &original).unwrap();
+    assert_eq!(
+        enqueue(
+            &fixture.queue(),
+            &config,
+            &fixture.source,
+            "evidence",
+            &QueueLimits::default(),
+        )
+        .unwrap()
+        .id,
+        queued.id
+    );
+}
+#[test]
+fn missing_pending_snapshot_reenqueue_preserves_source_and_database() {
+    pending_reenqueue_refuses_broken_snapshot(true);
+}
+#[test]
+fn same_size_corrupted_pending_snapshot_reenqueue_preserves_source_and_database() {
+    pending_reenqueue_refuses_broken_snapshot(false);
+}
+
 #[test]
 fn lost_ack_then_restart_retries_same_bytes_and_target_with_backoff() {
     let fixture = Fixture::new();
@@ -918,7 +976,7 @@ fn network_wait_allows_cross_process_enqueue_and_other_workers_skip_lease() {
 
 fn downgrade_v1(directory: &Path, sent: &QueueItem, ack: &SignedReceipt) {
     let conn = Connection::open(directory.join(DB)).unwrap();
-    conn.execute_batch("DROP TABLE receipt_archive; ALTER TABLE queue_items DROP COLUMN lease_token; ALTER TABLE queue_items DROP COLUMN lease_expires_ms; PRAGMA user_version=1;").unwrap();
+    conn.execute_batch("DROP TABLE bundle_refs; DROP TABLE bundle_jobs; DROP TABLE receipt_archive; ALTER TABLE queue_items DROP COLUMN lease_token; ALTER TABLE queue_items DROP COLUMN lease_expires_ms; PRAGMA user_version=1;").unwrap();
     conn.execute("UPDATE queue_items SET state='sent',receipt_json=?1,sent_at_ms=1001,next_retry_ms=0 WHERE id=?2",params![serde_json::to_string(ack).unwrap(),sent.id]).unwrap();
 }
 #[test]
@@ -969,7 +1027,7 @@ fn v1_migration_preserves_receipts_pending_snapshots_and_dedup() {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, SCHEMA_VERSION);
     fs::write(&fixture.source, b"original snapshot").unwrap();
     assert_eq!(
         enqueue(

@@ -75,6 +75,8 @@ struct AppState {
     storage: Arc<Mutex<Storage>>,
     config: Arc<ServerConfig>,
     permits: Arc<tokio::sync::Semaphore>,
+    completion_permits: Arc<tokio::sync::Semaphore>,
+    control_permits: Arc<tokio::sync::Semaphore>,
 }
 
 /// 저장소/키 경계와 토큰을 검증한 뒤 라우터를 만든다. 서버 설정을 로그에 쓰지 않는다.
@@ -125,6 +127,8 @@ pub fn router(config: ServerConfig) -> Result<Router> {
         })),
         config: Arc::new(config),
         permits: Arc::new(tokio::sync::Semaphore::new(4)),
+        completion_permits: Arc::new(tokio::sync::Semaphore::new(2)),
+        control_permits: Arc::new(tokio::sync::Semaphore::new(2)),
     };
     Ok(Router::new()
         .route("/v1/bundles", post(bundle_api::register))
@@ -327,6 +331,34 @@ impl Storage {
         )
     }
     fn put(&mut self, agent: &str, hash: &str, kind: &str, bytes: &[u8]) -> Result<SignedReceipt> {
+        self.put_inner(agent, hash, kind, bytes, false)
+    }
+    /// 관리자 검토 경로만 호출한다. 임의 제어 객체가 취소 예산을 쓰지 못하게 재검증한다.
+    fn put_revocation(&mut self, agent: &str, hash: &str, bytes: &[u8]) -> Result<SignedReceipt> {
+        self.put_inner(agent, hash, "bundle-review", bytes, true)
+    }
+    fn put_inner(
+        &mut self,
+        agent: &str,
+        hash: &str,
+        kind: &str,
+        bytes: &[u8],
+        revocation: bool,
+    ) -> Result<SignedReceipt> {
+        let control = if kind.starts_with("bundle-") {
+            Some(crate::bundle::control_identity(
+                kind,
+                bytes,
+                agent,
+                &self.config.key_id,
+                &hex::encode(self.key.verifying_key().to_bytes()),
+            )?)
+        } else {
+            None
+        };
+        if revocation && !control.as_ref().is_some_and(|(_, revoked)| *revoked) {
+            return Err("취소 전용 예산에 허용되지 않은 객체".into());
+        }
         if bytes.len() > self.config.max_object_bytes {
             return Err("객체 크기가 서버 상한을 초과합니다".into());
         }
@@ -355,7 +387,12 @@ impl Storage {
             self.capacity.write_failed();
             return Err(Box::new(CapacityRejection("incomplete_existing_object")));
         }
-        self.capacity.reserve(agent, bytes.len() as u64)?;
+        if revocation {
+            self.capacity
+                .reserve_revocation(agent, bytes.len() as u64)?;
+        } else {
+            self.capacity.reserve(agent, bytes.len() as u64)?;
+        }
         let result = (|| -> Result<SignedReceipt> {
             let directory = self.directory(agent)?;
             write_new(&object_path, bytes)?;
@@ -382,8 +419,11 @@ impl Storage {
         match result {
             Ok(receipt) => {
                 self.capacity.mark_receipted(agent);
-                if kind.starts_with("bundle-") {
-                    self.capacity.bundle_control_objects += 1;
+                if revocation {
+                    self.capacity.mark_revocation_receipted(agent);
+                }
+                if let Some((bundle, _)) = control {
+                    self.capacity.note_control(agent, &bundle)?;
                 }
                 Ok(receipt)
             }
@@ -395,24 +435,51 @@ impl Storage {
             }
         }
     }
+    fn reader(&self) -> StorageReader {
+        StorageReader {
+            dir: self.config.dir.clone(),
+            key_id: self.config.key_id.clone(),
+            public_key: hex::encode(self.key.verifying_key().to_bytes()),
+            max_object_bytes: self.config.max_object_bytes,
+        }
+    }
     fn get(&self, agent: &str, hash: &str) -> Result<(SignedReceipt, Vec<u8>)> {
-        // 읽기 API는 없는 디렉터리를 생성하지 않는다.
-        validate_private_directory(&self.config.dir.join(agent))?;
+        self.reader().get(agent, hash)
+    }
+}
+/// 공개 검증 자료만 복사한다. 큰 청크 읽기/해시 중 작성자 잠금을 잡지 않는다.
+struct StorageReader {
+    dir: PathBuf,
+    key_id: String,
+    public_key: String,
+    max_object_bytes: usize,
+}
+impl StorageReader {
+    fn paths(&self, agent: &str, hash: &str) -> (PathBuf, PathBuf) {
+        let dir = self.dir.join(agent);
+        (
+            dir.join(format!("{hash}.blob")),
+            dir.join(format!("{hash}.receipt.json")),
+        )
+    }
+    fn get(&self, agent: &str, hash: &str) -> Result<(SignedReceipt, Vec<u8>)> {
+        validate_private_directory(&self.dir.join(agent))?;
         let (object_path, receipt_path) = self.paths(agent, hash);
         let receipt: SignedReceipt =
             serde_json::from_slice(&read_storage_file(&receipt_path, MAX_RECEIPT_BYTES)?)?;
-        verify_receipt(&receipt, &hex::encode(self.key.verifying_key().to_bytes()))?;
+        verify_receipt(&receipt, &self.public_key)?;
         if receipt.receipt.agent_id != agent
             || receipt.receipt.sha256 != hash
-            || receipt.receipt.key_id != self.config.key_id
+            || receipt.receipt.key_id != self.key_id
         {
             return Err("저장된 증명의 신원이 다릅니다".into());
         }
-        let bytes = read_storage_file(&object_path, self.config.max_object_bytes)?;
+        let bytes = read_storage_file(&object_path, self.max_object_bytes)?;
         verify_body(&bytes, &receipt)?;
         Ok((receipt, bytes))
     }
 }
+
 fn read_storage_file(path: &Path, maximum: usize) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     #[cfg(unix)]

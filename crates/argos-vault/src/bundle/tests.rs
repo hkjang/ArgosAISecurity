@@ -262,7 +262,9 @@ fn catalog_loss_and_truncated_latest_revocation_never_expose_old_good() {
         .execute("DELETE FROM reviews WHERE sequence=2", [])
         .unwrap();
     assert!(get(&config, "agent-a", &manifest.bundle_id).is_err());
-    assert!(list(&config, "agent-a", None, 20).is_err());
+    let page = list(&config, "agent-a", None, 20).unwrap();
+    assert!(page.items.is_empty());
+    assert_eq!(page.unavailable[0].bundle_id, manifest.bundle_id);
     drop(server);
     fs::remove_file(&db).unwrap();
     fs::remove_file(fixture.server.dir.join(".argos-bundles.ready")).unwrap();
@@ -276,6 +278,7 @@ fn catalog_loss_and_truncated_latest_revocation_never_expose_old_good() {
 #[test]
 fn completion_and_review_quota_failures_leave_current_state_unchanged() {
     let mut fixture = Fixture::new();
+    fixture.server.capacity.revocation_max_objects = 0; // 명시적으로 v0.6 일반 풀 동작
     fixture.server.capacity.global_max_objects = 2;
     let server = Server::start(fixture.server.clone());
     let config = fixture.config(&server);
@@ -414,8 +417,12 @@ fn publication_interruption_resumes_same_signed_bytes_without_false_completion()
         .unwrap()
         .execute_batch("DROP TRIGGER fail_complete;")
         .unwrap();
-    // publish도 register→complete 순서라 동일 등록 재시도로 중단된 완료를 마친다.
+    // 등록은 짧은 작업만 한다. publish의 두 번째 단계인 complete가 검증을 재개한다.
     assert!(register_manifest(&config, &manifest)
+        .unwrap()
+        .completion
+        .is_none());
+    assert!(complete(&config, &manifest.bundle_id)
         .unwrap()
         .completion
         .is_some());
@@ -543,4 +550,493 @@ fn final_review_slot_is_reserved_for_revocation() {
     assert_eq!(revoked.reviews.len(), 100);
     assert!(!revoked.recommended);
     assert_eq!(revoked.current_review, "revoked");
+}
+
+#[test]
+fn full_normal_quota_preserves_bounded_revocations_and_pending_revoke_after_restart() {
+    let mut fixture = Fixture::new();
+    fixture.server.capacity.global_max_objects = 8;
+    fixture.server.capacity.agent_max_objects = 8;
+    fixture.server.capacity.revocation_max_objects = 1;
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    let mut manifests = Vec::new();
+    for name in ["first", "second"] {
+        let (stage, manifest) = fixture.prepare(name, name.as_bytes());
+        upload_prepared(&config, &stage).unwrap();
+        review(
+            &config,
+            "agent-a",
+            &manifest.bundle_id,
+            &decision(name, ReviewDecision::Good),
+        )
+        .unwrap();
+        manifests.push(manifest);
+    }
+    let usage = fetch_usage(&config).unwrap();
+    assert_eq!(usage.normal_usage.objects, 8);
+    assert!(usage.new_uploads_blocked);
+    let extra = fixture.root.join("extra");
+    write_new(&extra, b"no normal capacity").unwrap();
+    assert!(upload_file(&config, &extra, "audit").is_err());
+    let first = &manifests[0].bundle_id;
+    let second = &manifests[1].bundle_id;
+    let revoked = review(
+        &config,
+        "agent-a",
+        first,
+        &decision("revoke-first", ReviewDecision::Revoked),
+    )
+    .unwrap();
+    assert_eq!(revoked.current_review, "revoked");
+    let usage = fetch_usage(&config).unwrap();
+    assert_eq!(usage.total.objects, 9);
+    assert_eq!(usage.normal_usage.objects, 8);
+    assert_eq!(usage.revocation_usage.objects, 1);
+    assert_eq!(usage.agents["agent-a"].revocation_usage.objects, 1);
+    assert_eq!(
+        usage.total.logical_bytes,
+        usage.normal_usage.logical_bytes + usage.revocation_usage.logical_bytes
+    );
+    // 취소 예산 소진은 507이며, FULL 의도 저장 이후에는 과거 good를 내보내지 않는다.
+    let request = decision("revoke-second", ReviewDecision::Revoked);
+    let response = reqwest::blocking::Client::new()
+        .post(format!(
+            "{}/v1/bundles/agent-a/{second}/reviews",
+            server.endpoint
+        ))
+        .bearer_auth(&config.admin_token)
+        .json(&request)
+        .send()
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 507);
+    assert!(get(&config, "agent-a", second).is_err());
+    drop(server);
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    let usage = fetch_usage(&config).unwrap();
+    assert_eq!(usage.revocation_usage.objects, 1);
+    assert_eq!(usage.normal_usage.objects, 8);
+    assert_eq!(
+        get(&config, "agent-a", first).unwrap().current_review,
+        "revoked"
+    );
+    assert!(get(&config, "agent-a", second).is_err());
+    let page = list(&config, "agent-a", None, 20).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.unavailable[0].bundle_id, *second);
+    review(
+        &config,
+        "agent-a",
+        first,
+        &decision("revoke-first", ReviewDecision::Revoked),
+    )
+    .unwrap();
+    assert_eq!(fetch_usage(&config).unwrap().total.objects, 9);
+    drop(server);
+    fixture.server.capacity.revocation_max_objects = 2;
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    assert_eq!(
+        review(&config, "agent-a", second, &request)
+            .unwrap()
+            .current_review,
+        "revoked"
+    );
+    assert_eq!(fetch_usage(&config).unwrap().total.objects, 10);
+}
+
+#[test]
+fn interrupted_bundle_isolated_from_healthy_listing_fetch_and_restart() {
+    let fixture = Fixture::new();
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    let (healthy_stage, healthy) = fixture.prepare("healthy", b"independent recoverable backup");
+    upload_prepared(&config, &healthy_stage).unwrap();
+    review(
+        &config,
+        "agent-a",
+        &healthy.bundle_id,
+        &decision("healthy-good", ReviewDecision::Good),
+    )
+    .unwrap();
+    let (stage, broken) = fixture.prepare("broken", b"interrupted backup");
+    register_manifest(&config, &broken).unwrap();
+    upload_file(
+        &config,
+        &stage
+            .join("chunks")
+            .join(format!("{}.bin", broken.chunks[0].sha256)),
+        "backup",
+    )
+    .unwrap();
+    let db = fixture.server.dir.join(".argos-bundles.sqlite3");
+    Connection::open(&db).unwrap().execute_batch("CREATE TRIGGER fail_complete BEFORE UPDATE OF completion_hash ON bundles BEGIN SELECT RAISE(FAIL,'interrupted'); END;").unwrap();
+    assert!(complete(&config, &broken.bundle_id).is_err());
+    assert!(get(&config, "agent-a", &broken.bundle_id).is_err());
+    for iteration in 0..2 {
+        let page = list(&config, "agent-a", None, 20).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].bundle_id, healthy.bundle_id);
+        assert!(page.items[0].recommended);
+        assert_eq!(page.unavailable.len(), 1);
+        assert_eq!(page.unavailable[0].bundle_id, broken.bundle_id);
+        let dest = fixture.root.join(format!("recover-{iteration}"));
+        fetch(&config, "agent-a", &healthy.bundle_id, &dest, false).unwrap();
+        assert_eq!(fs::read(dest).unwrap(), b"independent recoverable backup");
+        // 보류만 있는 페이지라도 cursor가 진행하여 다음 정상 번들을 찾는다.
+        let first = list(&config, "agent-a", None, 1).unwrap();
+        let second = list(&config, "agent-a", first.next_cursor.as_deref(), 1).unwrap();
+        assert!(second.next_cursor.is_none());
+        assert_eq!(first.items.len() + second.items.len(), 1);
+    }
+    drop(server);
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    assert!(get(&config, "agent-a", &broken.bundle_id).is_err());
+    fetch(
+        &config,
+        "agent-a",
+        &healthy.bundle_id,
+        &fixture.root.join("after-restart"),
+        false,
+    )
+    .unwrap();
+    let page = list(&config, "agent-a", None, 20).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.unavailable.len(), 1);
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch("DROP TRIGGER fail_complete;")
+        .unwrap();
+    assert!(complete(&config, &broken.bundle_id)
+        .unwrap()
+        .completion
+        .is_some());
+    assert!(list(&config, "agent-a", None, 20)
+        .unwrap()
+        .unavailable
+        .is_empty());
+}
+
+#[test]
+fn large_completion_releases_global_lock_for_admin_revocation() {
+    let fixture = Fixture::new();
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    let (healthy_stage, healthy) = fixture.prepare("approved", b"approved backup");
+    upload_prepared(&config, &healthy_stage).unwrap();
+    review(
+        &config,
+        "agent-a",
+        &healthy.bundle_id,
+        &decision("good", ReviewDecision::Good),
+    )
+    .unwrap();
+    let (stage, large) = fixture.prepare("large", &vec![3u8; CHUNK_BYTES + 1]);
+    register_manifest(&config, &large).unwrap();
+    for chunk in &large.chunks {
+        upload_file(
+            &config,
+            &stage.join("chunks").join(format!("{}.bin", chunk.sha256)),
+            "backup",
+        )
+        .unwrap();
+    }
+    let (entered, wait) = mpsc::channel();
+    let (resume, paused) = mpsc::channel();
+    COMPLETION_TEST_GATES
+        .lock()
+        .unwrap()
+        .push(CompletionTestGate {
+            phase: "before-read",
+            directory: fixture.server.dir.clone(),
+            entered,
+            resume: paused,
+        });
+    let worker_config = config.clone();
+    let id = large.bundle_id.clone();
+    let worker = thread::spawn(move || complete(&worker_config, &id));
+    wait.recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    let started = std::time::Instant::now();
+    let result = review(
+        &config,
+        "agent-a",
+        &healthy.bundle_id,
+        &decision("revoke-concurrent", ReviewDecision::Revoked),
+    );
+    let elapsed = started.elapsed();
+    resume.send(()).unwrap();
+    assert_eq!(result.unwrap().current_review, "revoked");
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "독립 취소가 긴 완료 검증에 대기함: {elapsed:?}"
+    );
+    assert!(worker.join().unwrap().unwrap().completion.is_some());
+    assert!(
+        !get(&config, "agent-a", &healthy.bundle_id)
+            .unwrap()
+            .recommended
+    );
+}
+
+#[test]
+fn revocation_byte_and_agent_reserves_are_independent_limits() {
+    for scope in ["global-bytes", "agent-bytes", "agent-objects"] {
+        let mut fixture = Fixture::new();
+        let server = Server::start(fixture.server.clone());
+        let config = fixture.config(&server);
+        let (stage, manifest) = fixture.prepare(scope, b"backup");
+        upload_prepared(&config, &stage).unwrap();
+        review(
+            &config,
+            "agent-a",
+            &manifest.bundle_id,
+            &decision("good", ReviewDecision::Good),
+        )
+        .unwrap();
+        if scope == "agent-objects" {
+            review(
+                &config,
+                "agent-a",
+                &manifest.bundle_id,
+                &decision("first-revoke", ReviewDecision::Revoked),
+            )
+            .unwrap();
+            review(
+                &config,
+                "agent-a",
+                &manifest.bundle_id,
+                &decision("new-good", ReviewDecision::Good),
+            )
+            .unwrap();
+        }
+        drop(server);
+        match scope {
+            "global-bytes" => fixture.server.capacity.revocation_max_bytes = 1,
+            "agent-bytes" => fixture.server.capacity.revocation_agent_max_bytes = 1,
+            _ => fixture.server.capacity.revocation_agent_max_objects = 1,
+        }
+        let server = Server::start(fixture.server.clone());
+        let config = fixture.config(&server);
+        let before = fetch_usage(&config).unwrap().total.objects;
+        assert!(review(
+            &config,
+            "agent-a",
+            &manifest.bundle_id,
+            &decision("blocked-revoke", ReviewDecision::Revoked)
+        )
+        .is_err());
+        assert!(get(&config, "agent-a", &manifest.bundle_id).is_err());
+        assert_eq!(fetch_usage(&config).unwrap().total.objects, before);
+    }
+}
+
+#[test]
+fn unknown_control_owner_remains_a_global_fail_closed_condition() {
+    let fixture = Fixture::new();
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    let (stage, manifest) = fixture.prepare("valid", b"valid backup");
+    upload_prepared(&config, &stage).unwrap();
+    review(
+        &config,
+        "agent-a",
+        &manifest.bundle_id,
+        &decision("good", ReviewDecision::Good),
+    )
+    .unwrap();
+    drop(server);
+    // 수신증명은 유효하더라도 bundle ID와 결합할 수 없는 제어 본문은 귀속할 수 없다.
+    let bytes = b"invalid control with a valid outer receipt";
+    let hash = sha256(bytes);
+    let key = load_key(&fixture.server.signing_key_file).unwrap();
+    let now = now_ms();
+    let receipt = sign(
+        Receipt {
+            format: FORMAT.into(),
+            key_id: fixture.server.key_id.clone(),
+            agent_id: "agent-a".into(),
+            kind: "bundle-review".into(),
+            sha256: hash.clone(),
+            size_bytes: bytes.len() as u64,
+            received_at_ms: now,
+            retention_until_ms: now + 86400000,
+        },
+        &key,
+    )
+    .unwrap();
+    let dir = fixture.server.dir.join("agent-a");
+    write_new(&dir.join(format!("{hash}.blob")), bytes).unwrap();
+    write_receipt_new(&dir.join(format!("{hash}.receipt.json")), &receipt).unwrap();
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    assert!(!fetch_usage(&config).unwrap().storage_consistent);
+    assert!(get(&config, "agent-a", &manifest.bundle_id).is_err());
+    assert!(list(&config, "agent-a", None, 20).is_err());
+}
+
+#[test]
+fn completion_rechecks_file_identity_before_committing_verified_snapshot() {
+    let fixture = Fixture::new();
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    let (stage, manifest) = fixture.prepare("snapshot", b"verified backup");
+    register_manifest(&config, &manifest).unwrap();
+    upload_file(
+        &config,
+        &stage
+            .join("chunks")
+            .join(format!("{}.bin", manifest.chunks[0].sha256)),
+        "backup",
+    )
+    .unwrap();
+    let (entered, wait) = mpsc::channel();
+    let (resume, paused) = mpsc::channel();
+    COMPLETION_TEST_GATES
+        .lock()
+        .unwrap()
+        .push(CompletionTestGate {
+            directory: fixture.server.dir.clone(),
+            phase: "before-commit",
+            entered,
+            resume: paused,
+        });
+    let worker_config = config.clone();
+    let id = manifest.bundle_id.clone();
+    let worker = thread::spawn(move || complete(&worker_config, &id));
+    wait.recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    let blob = fixture
+        .server
+        .dir
+        .join("agent-a")
+        .join(format!("{}.blob", manifest.chunks[0].sha256));
+    // 동일 바이트여도 다른 inode로 교체되면 이번 검증 snapshot은 폐기한다.
+    fs::remove_file(&blob).unwrap();
+    write_new(&blob, b"verified backup").unwrap();
+    resume.send(()).unwrap();
+    assert!(worker.join().unwrap().is_err());
+    assert!(get(&config, "agent-a", &manifest.bundle_id)
+        .unwrap()
+        .completion
+        .is_none());
+    assert!(complete(&config, &manifest.bundle_id)
+        .unwrap()
+        .completion
+        .is_some());
+}
+
+#[test]
+fn reserved_revoke_supersedes_unpublished_good_without_losing_request_audit() {
+    let mut fixture = Fixture::new();
+    fixture.server.capacity.global_max_objects = 4;
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    let (stage, manifest) = fixture.prepare("pending-good", b"backup");
+    upload_prepared(&config, &stage).unwrap();
+    review(
+        &config,
+        "agent-a",
+        &manifest.bundle_id,
+        &decision("old-good", ReviewDecision::Good),
+    )
+    .unwrap();
+    let pending = decision("quota-good", ReviewDecision::Good);
+    assert!(review(&config, "agent-a", &manifest.bundle_id, &pending).is_err());
+    assert_eq!(
+        get(&config, "agent-a", &manifest.bundle_id)
+            .unwrap()
+            .current_review,
+        "good"
+    );
+    let revoked = review(
+        &config,
+        "agent-a",
+        &manifest.bundle_id,
+        &decision("priority-revoke", ReviewDecision::Revoked),
+    )
+    .unwrap();
+    assert_eq!(revoked.current_review, "revoked");
+    assert_eq!(revoked.reviews.len(), 2);
+    assert!(review(&config, "agent-a", &manifest.bundle_id, &pending).is_err());
+    let db = fixture.server.dir.join(".argos-bundles.sqlite3");
+    let archived: String = Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT payload FROM intents WHERE operation GLOB 'superseded-review-*'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let event: Signed<ReviewEvent> = serde_json::from_str(&archived).unwrap();
+    assert_eq!(event.value.request, pending);
+    verify_value(&event, &fixture.pubkey).unwrap();
+    drop(server);
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    assert_eq!(
+        get(&config, "agent-a", &manifest.bundle_id)
+            .unwrap()
+            .current_review,
+        "revoked"
+    );
+    assert!(review(&config, "agent-a", &manifest.bundle_id, &pending).is_err());
+}
+
+#[test]
+fn revoke_intent_survives_failed_pending_good_repair_and_reuses_published_bytes() {
+    let fixture = Fixture::new();
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    let (stage, manifest) = fixture.prepare("published-good", b"backup");
+    upload_prepared(&config, &stage).unwrap();
+    review(
+        &config,
+        "agent-a",
+        &manifest.bundle_id,
+        &decision("old-good", ReviewDecision::Good),
+    )
+    .unwrap();
+    let db = fixture.server.dir.join(".argos-bundles.sqlite3");
+    Connection::open(&db).unwrap().execute_batch("CREATE TRIGGER fail_review BEFORE INSERT ON reviews BEGIN SELECT RAISE(FAIL,'interrupted'); END;").unwrap();
+    let pending = decision("published-good", ReviewDecision::Good);
+    assert!(review(&config, "agent-a", &manifest.bundle_id, &pending).is_err());
+    let count = fetch_usage(&config).unwrap().total.objects;
+    let request = decision("priority-revoke", ReviewDecision::Revoked);
+    assert!(review(&config, "agent-a", &manifest.bundle_id, &request).is_err());
+    assert!(get(&config, "agent-a", &manifest.bundle_id).is_err());
+    let sticky: u64 = Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM intents WHERE operation='revoke'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(sticky, 1);
+    drop(server);
+    let server = Server::start(fixture.server.clone());
+    let config = fixture.config(&server);
+    assert!(get(&config, "agent-a", &manifest.bundle_id).is_err());
+    assert!(review(&config, "agent-a", &manifest.bundle_id, &pending).is_err());
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch("DROP TRIGGER fail_review;")
+        .unwrap();
+    let revoked = review(&config, "agent-a", &manifest.bundle_id, &request).unwrap();
+    assert_eq!(revoked.current_review, "revoked");
+    assert_eq!(revoked.reviews.len(), 3);
+    assert_eq!(revoked.reviews[1].value.request, pending);
+    assert_eq!(fetch_usage(&config).unwrap().total.objects, count + 1);
+    let sticky: u64 = Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM intents WHERE operation='revoke'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(sticky, 0);
 }

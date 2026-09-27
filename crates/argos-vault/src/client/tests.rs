@@ -7,6 +7,24 @@ use std::{
 
 const SECRET: &str = "remote-token-private-endpoint-secret";
 
+#[test]
+fn tls_trust_list_is_bounded_explicit_and_never_enabled_over_http() {
+    let mut configured = config("https://127.0.0.1:443".into());
+    assert_eq!(tls_ca_sha256(&configured).unwrap(), None);
+    for pem in [
+        String::new(),
+        "not a PEM certificate".into(),
+        "x".repeat(65537),
+    ] {
+        configured.tls_ca_pem = Some(pem);
+        assert!(validated_endpoint(&configured).is_err());
+        assert!(tls_ca_sha256(&configured).is_err());
+    }
+    configured.endpoint = "http://127.0.0.1:443".into();
+    assert!(validated_endpoint(&configured).is_err());
+    assert!(!format!("{configured:?}").contains("not a PEM"));
+}
+
 fn config(endpoint: String) -> VaultConfig {
     let key = SigningKey::from_bytes(&[23; 32]);
     VaultConfig {

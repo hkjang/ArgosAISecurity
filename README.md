@@ -15,16 +15,18 @@
 
 <hr />
 
-## 현재 릴리즈: v0.6.0
+## 현재 릴리즈: v0.7.0
 
-[v0.6.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.6.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.6.0.md)
+[v0.7.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.7.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.7.0.md)
 
-2026-09-27 기준, **최대 1GiB 백업의 분할 보관, 원격 정상 판정·취소, 원본 서버와 로컬 DB 없는 복구 시험**을 추가했습니다. 활성 큐·완료 이력 분리, 작업 임대와 예약 전송도 유지합니다. 보호 경로 공백 검사·정책 예외 감사·AI 인용 검사는 계속 제공합니다. 자동 차단은 기본 비활성입니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
+2026-09-27 기준, **번들 게시 작업의 자동 재개, 승인 전 격리 복구 시험, 취소 기록용 예약 용량과 번들별 장애 분리**를 추가했습니다. 활성 큐·완료 이력 분리, 작업 임대와 예약 전송도 유지합니다. 보호 경로 공백 검사·정책 예외 감사·AI 인용 검사는 계속 제공합니다. 자동 차단은 기본 비활성입니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
 
-워크스페이스 테스트 248개와 별도 PostgreSQL 시험 1개가 통과했습니다. 최신 실제 CLI·에이전트 시나리오의 결과·환경·미검증 범위는 [검증 기록](docs/PLATFORM_VALIDATION.md)에 정리합니다. PostgreSQL 드릴에는 별도 PostgreSQL 설치와 Linux bubblewrap이 필요합니다.
+워크스페이스 테스트 275개와 별도 PostgreSQL·SQLite 격리 시험 2개가 통과했습니다. 최신 실제 CLI·에이전트 시나리오의 결과·환경·미검증 범위는 [검증 기록](docs/PLATFORM_VALIDATION.md)에 정리합니다. PostgreSQL 드릴에는 별도 PostgreSQL 설치와 Linux bubblewrap이 필요합니다.
 
 | 추가 기능 | 시작 명령·안내 |
 | --- | --- |
+| 번들 자동 게시·중단 재개 | `vault bundle enqueue`, `vault queue drain`, `vault queue jobs` — [영속 작업](docs/FEATURE_BUNDLE_JOBS.md) |
+| 승인 전 격리 복구 시험 | `vault bundle test --preapproval` — [시험과 승인 분리](docs/FEATURE_RECOVERY_BUNDLE_CLI.md) |
 | 분할 백업·원격 복구 목록 | `vault bundle prepare`, `upload`, `list` — [16MiB 청크·완료 증명](docs/FEATURE_RECOVERY_BUNDLE.md) |
 | 원격 정상 판정·취소 | `vault bundle review`, `show` — [판정과 보관의 신뢰 경계](docs/FEATURE_RECOVERY_BUNDLE.md) |
 | 원본 서버 없는 복구 시험 | `vault bundle fetch`, `test` — [새 호스트 CLI 절차](docs/FEATURE_RECOVERY_BUNDLE_CLI.md) |
@@ -56,7 +58,7 @@
 | 중앙관리 서버 + 대시보드 | `argos-central` | 인증된 등록·수집·조회, 생존 신호·전달 중복 제거 |
 | CLI | `argos-cli` | 운영 조회·복구·정책·조사, 조회형 MCP, HTML 보고서·증거 패키지 |
 
-원격 복구 묶음은 **백업 한 파일과 메타데이터·선택적 복구 계획**을 보존합니다. 사건 증거 3개 파일의 자동 원자적 묶음은 아직 제공하지 않습니다. `unknown`·`revoked` 또는 미완료 묶음은 일반 복구·시험에서 거부합니다. 보관 서버의 완료·검토 서명과 로컬 시험 보고서를 구분하며, 시험 보고서는 여전히 무서명입니다.
+원격 복구 묶음은 **백업 한 파일과 메타데이터·선택적 복구 계획**을 보존합니다. 사건 증거 3개 파일의 자동 원자적 묶음은 아직 제공하지 않습니다. `unknown`은 명시적 승인 전 격리 시험으로만 검사하며 성공해도 운영 복구 승인이 되지 않습니다. 일반 복구·시험은 현재 `good`만 허용하며, `revoked`와 미완료는 승인 전 시험도 거부합니다. 보관 서버의 완료·검토 서명과 로컬 시험 보고서를 구분하며, 시험 보고서는 여전히 무서명입니다.
 
 ## 빌드 및 실행
 
@@ -206,7 +208,7 @@ argos mcp # 설정한 단일 호스트 DB를 조회하는 stdio MCP 서버
 
 | 목적 | 문서 |
 | --- | --- |
-| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.6.0 변경 사항](docs/releases/v0.6.0.md) |
+| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.7.0 변경 사항](docs/releases/v0.7.0.md) |
 | 일상 운영·사고 조사 | [운영자](docs/ROLE_OPERATOR.md), [분석가](docs/ROLE_ANALYST.md), [관리자](docs/ROLE_ADMINISTRATOR.md) |
 | 명령·서비스 설정 | [CLI](docs/SERVICE_CLI.md), [에이전트](docs/SERVICE_AGENT.md), [중앙 서버](docs/SERVICE_CENTRAL.md) |
 | 구현과 후속 요구 | [아키텍처](docs/ARCHITECTURE.md), [코드 분석](docs/SOURCE_CODE_ANALYSIS.md), [요건서](docs/REQUIREMENTS.md), [로드맵](docs/ROADMAP.md) |

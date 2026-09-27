@@ -146,3 +146,7 @@ SQLite 원본 불변·쓰기 롤백·기대 행 수 실패·기존 작업 경로
 ## 원격 백업과 연결
 
 v0.6.0의 [복구 묶음 CLI](FEATURE_RECOVERY_BUNDLE_CLI.md)는 현재 정상 판정을 확인한 원격 백업을 새 경로로 받고, 함께 보관한 계획의 백업 경로만 변경해 같은 감독·고정 DB 검사를 실행합니다. 원본 에이전트 DB는 사용하지 않으며 결과 일관성 검사와 최종 원격 판정 재조회까지 수행합니다. 서버의 완료·검토 서명과 별개로 로컬 시험 보고서는 무서명입니다.
+
+## 승인 전 원격 백업 시험
+
+v0.7.0은 완료된 unknown 번들에 `vault bundle test --preapproval`를 제공한다. SQLite는 지원하는 Linux GNU x86_64의 bubblewrap에서 읽기 전용 백업과 필요한 런타임만 노출하고 네트워크·PID·사용자 namespace를 분리하고 상속된 파일·소켓을 닫는다. 이 경로에는 Linux 5.11 이상의 close_range 지원이 필요하다. PostgreSQL은 기존 전용 namespace 경로를 사용한다. 격리를 준비할 수 없으면 시험을 거부한다. 성공해도 원격 판정은 unknown이며 운영 복구를 허용하지 않는다. [실행 조건·결과 의미](FEATURE_RECOVERY_BUNDLE_CLI.md)와 [승인 흐름](FEATURE_BUNDLE_OPERATIONS.md)을 따른다.

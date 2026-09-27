@@ -166,7 +166,7 @@ pub fn register_manifest(config: &VaultConfig, manifest: &BundleManifest) -> Res
             .bearer_auth(crate::client::token(&config.upload_token)?)
             .json(manifest)
             .send()
-            .map_err(|_| "번들 네트워크 요청 실패")?,
+            .map_err(crate::client::transport_error)?,
     )?;
     if record.manifest != *manifest {
         return Err("등록 응답 manifest가 요청과 다릅니다".into());
@@ -186,7 +186,7 @@ pub fn complete(config: &VaultConfig, bundle_id: &str) -> Result<BundleRecord> {
             .post(url.join(&format!("v1/bundles/{bundle_id}/complete"))?)
             .bearer_auth(crate::client::token(&config.upload_token)?)
             .send()
-            .map_err(|_| "번들 네트워크 요청 실패")?,
+            .map_err(crate::client::transport_error)?,
     )?;
     if record.completion.is_none() {
         return Err("서버가 번들 완료를 확인하지 않았습니다".into());
@@ -227,7 +227,7 @@ pub fn get(config: &VaultConfig, agent: &str, bundle_id: &str) -> Result<BundleR
             .get(url.join(&format!("v1/bundles/{agent}/{bundle_id}"))?)
             .bearer_auth(crate::client::token(&config.admin_token)?)
             .send()
-            .map_err(|_| "번들 네트워크 요청 실패")?,
+            .map_err(crate::client::transport_error)?,
     )
 }
 pub fn list(
@@ -254,19 +254,78 @@ pub fn list(
             .get(url)
             .bearer_auth(crate::client::token(&config.admin_token)?)
             .send()
-            .map_err(|_| "번들 네트워크 요청 실패")?,
+            .map_err(crate::client::transport_error)?,
         2 * 1024 * 1024,
     )?)?;
+    validate_page(&page, agent, after, limit)?;
+    Ok(page)
+}
+
+fn validate_page(page: &BundleList, agent: &str, after: Option<&str>, limit: usize) -> Result<()> {
+    let mut ids = std::collections::BTreeSet::new();
+    for id in page
+        .items
+        .iter()
+        .map(|item| &item.bundle_id)
+        .chain(page.unavailable.iter().map(|item| &item.bundle_id))
+    {
+        if !valid_bundle_id(id)
+            || after.is_some_and(|cursor| id.as_str() <= cursor)
+            || !ids.insert(id.as_str())
+        {
+            return Err("번들 목록 ID/범위/중복 오류".into());
+        }
+    }
     if page.agent_id != agent
-        || page.items.len() > limit
+        || ids.len() > limit
+        || page
+            .unavailable
+            .iter()
+            .any(|item| item.reason != "bundle_state_unavailable")
+        || page.items.iter().any(|item| {
+            !valid_hash(&item.sha256)
+                || !(1..=MAX_BUNDLE_BYTES).contains(&item.size_bytes)
+                || !matches!(item.current_review.as_str(), "unknown" | "good" | "revoked")
+                || item.recommended != (item.complete && item.current_review == "good")
+        })
         || page
             .next_cursor
-            .as_ref()
-            .is_some_and(|id| !valid_bundle_id(id))
+            .as_deref()
+            .is_some_and(|cursor| !valid_bundle_id(cursor) || ids.last().copied() != Some(cursor))
     {
-        return Err("번들 목록 응답 범위 오류".into());
+        return Err("번들 목록 응답 범위/상태 오류".into());
     }
-    Ok(page)
+    Ok(())
+}
+
+#[cfg(test)]
+mod page_tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_entries_share_the_page_budget_and_cannot_repeat_or_rewind() {
+        let id = "a".repeat(32);
+        let mut page = BundleList {
+            agent_id: "agent".into(),
+            items: vec![],
+            next_cursor: Some(id.clone()),
+            unavailable: vec![UnavailableBundle {
+                bundle_id: id.clone(),
+                reason: "bundle_state_unavailable".into(),
+            }],
+        };
+        assert!(validate_page(&page, "agent", None, 1).is_ok());
+        assert!(validate_page(&page, "agent", Some(&id), 1).is_err());
+        assert!(validate_page(&page, "agent", None, 0).is_err());
+        page.unavailable.push(page.unavailable[0].clone());
+        assert!(validate_page(&page, "agent", None, 2).is_err());
+        page.unavailable.pop();
+        page.next_cursor = Some("b".repeat(32));
+        assert!(validate_page(&page, "agent", None, 1).is_err());
+        page.next_cursor = None;
+        page.unavailable[0].reason = "remote-untrusted-detail".into();
+        assert!(validate_page(&page, "agent", None, 1).is_err());
+    }
 }
 pub fn review(
     config: &VaultConfig,
@@ -288,7 +347,7 @@ pub fn review(
             .bearer_auth(crate::client::token(&config.admin_token)?)
             .json(request)
             .send()
-            .map_err(|_| "번들 네트워크 요청 실패")?,
+            .map_err(crate::client::transport_error)?,
     )?;
     if !record.reviews.iter().any(|r| r.value.request == *request) {
         return Err("검토 요청 적용 증명이 없습니다".into());
@@ -338,7 +397,7 @@ pub fn fetch(
                     .get(url.join(&format!("v1/receipts/{agent}/{}", chunk.sha256))?)
                     .bearer_auth(token)
                     .send()
-                    .map_err(|_| "번들 네트워크 요청 실패")?,
+                    .map_err(crate::client::transport_error)?,
                 MAX_RECEIPT_BYTES,
             )?)?;
             verify_receipt(&receipt, &config.pinned_pubkey)?;
@@ -355,7 +414,7 @@ pub fn fetch(
                     .get(url.join(&format!("v1/objects/{agent}/{}", chunk.sha256))?)
                     .bearer_auth(token)
                     .send()
-                    .map_err(|_| "번들 네트워크 요청 실패")?,
+                    .map_err(crate::client::transport_error)?,
                 CHUNK_BYTES,
             )?;
             verify_body(&bytes, &receipt)?;

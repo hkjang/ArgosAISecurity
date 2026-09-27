@@ -108,10 +108,19 @@ pub struct BundleSummary {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct UnavailableBundle {
+    pub bundle_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BundleList {
     pub agent_id: String,
     pub items: Vec<BundleSummary>,
     pub next_cursor: Option<String>,
+    #[serde(default)]
+    pub unavailable: Vec<UnavailableBundle>,
 }
 
 pub(crate) fn valid_bundle_id(value: &str) -> bool {
@@ -167,7 +176,7 @@ pub(crate) fn sign_value<T: Serialize>(value: T, key: &SigningKey) -> Result<Sig
         signature_hex,
     })
 }
-fn verify_value<T: Serialize>(value: &Signed<T>, key: &str) -> Result<()> {
+pub(crate) fn verify_value<T: Serialize>(value: &Signed<T>, key: &str) -> Result<()> {
     let signature: [u8; 64] = hex::decode(&value.signature_hex)?
         .try_into()
         .map_err(|_| "번들 서명 길이 오류")?;
@@ -256,3 +265,82 @@ pub fn verify_record(record: &BundleRecord, key: &str, key_id: &str) -> Result<(
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
+
+/// 시작 스캔에서 제어 객체를 귀속할 때 사용하는 제한된 신원 검사. receipt/body 대조 뒤 호출한다.
+pub(crate) fn control_identity(
+    kind: &str,
+    bytes: &[u8],
+    agent: &str,
+    key_id: &str,
+    key: &str,
+) -> Result<(String, bool)> {
+    match kind {
+        "bundle-manifest" => {
+            let manifest: BundleManifest = serde_json::from_slice(bytes)?;
+            validate(&manifest)?;
+            Ok((manifest.bundle_id, false))
+        }
+        "bundle-completion" => {
+            let signed: Signed<Completion> = serde_json::from_slice(bytes)?;
+            verify_value(&signed, key)?;
+            let c = signed.value;
+            if c.format != "argos-bundle-completion-v1"
+                || c.agent_id != agent
+                || c.key_id != key_id
+                || !valid_bundle_id(&c.bundle_id)
+                || !valid_hash(&c.manifest_sha256)
+                || !valid_hash(&c.sha256)
+                || c.size_bytes == 0
+                || c.size_bytes > MAX_BUNDLE_BYTES
+            {
+                return Err("완료 제어 객체 신원 오류".into());
+            }
+            Ok((c.bundle_id, false))
+        }
+        "bundle-review" => {
+            let signed: Signed<ReviewEvent> = serde_json::from_slice(bytes)?;
+            verify_value(&signed, key)?;
+            let r = signed.value;
+            validate_review(&r.request)?;
+            if r.format != "argos-bundle-review-v1"
+                || r.agent_id != agent
+                || r.key_id != key_id
+                || !valid_bundle_id(&r.bundle_id)
+                || !valid_hash(&r.manifest_sha256)
+                || !valid_hash(&r.completion_sha256)
+                || r.sequence == 0
+                || r.sequence > MAX_REVIEWS as u32
+                || r.previous_sha256.as_ref().is_some_and(|h| !valid_hash(h))
+            {
+                return Err("검토 제어 객체 신원 오류".into());
+            }
+            Ok((r.bundle_id, r.request.decision == ReviewDecision::Revoked))
+        }
+        _ => Err("알 수 없는 번들 제어 객체".into()),
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct CompletionTestGate {
+    pub directory: std::path::PathBuf,
+    pub phase: &'static str,
+    pub entered: std::sync::mpsc::Sender<()>,
+    pub resume: std::sync::mpsc::Receiver<()>,
+}
+#[cfg(test)]
+pub(crate) static COMPLETION_TEST_GATES: std::sync::Mutex<Vec<CompletionTestGate>> =
+    std::sync::Mutex::new(Vec::new());
+#[cfg(test)]
+pub(crate) fn wait_completion_test_gate(directory: &Path, phase: &str) {
+    let gate = {
+        let mut slots = COMPLETION_TEST_GATES.lock().unwrap();
+        slots
+            .iter()
+            .position(|g| g.directory == directory && g.phase == phase)
+            .map(|index| slots.swap_remove(index))
+    };
+    if let Some(gate) = gate {
+        let _ = gate.entered.send(());
+        let _ = gate.resume.recv_timeout(std::time::Duration::from_secs(20));
+    }
+}

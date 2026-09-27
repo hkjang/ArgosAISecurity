@@ -1,6 +1,6 @@
 # Argos CLI 명령 가이드
 
-`argos`는 v0.6.0의 조사·복구·정책 관리 도구다. 로컬 조사에는 에이전트와 같은 설정을 지정한다. `vault bundle`은 별도 보관 설정을 사용하며 원본 에이전트 DB를 읽지 않는다.
+`argos`는 v0.7.0의 조사·복구·정책 관리 도구다. 로컬 조사에는 에이전트와 같은 설정을 지정한다. `vault bundle`은 별도 보관 설정을 사용하며 원본 에이전트 DB를 읽지 않는다.
 명령은 해당 DB·백업에 필요한 OS 권한이 있는 계정으로 실행한다. 중앙 관리자 토큰이
 로컬 CLI 권한을 부여하지는 않는다. 명령별 옵션은 `argos <명령> --help`, 정책·보존 작업은 `argos policy --help`와
 `argos retention --help`에서 확인한다.
@@ -156,14 +156,14 @@ sudo argos isolate --release
 [보호 공백](FEATURE_COVERAGE.md), [DB 복구](FEATURE_SERVICE_RECOVERY.md), [원격 보관](FEATURE_REMOTE_VAULT.md), [영속 전송](FEATURE_VAULT_QUEUE.md), [용량 보호](FEATURE_VAULT_CAPACITY.md), [예외 감사](FEATURE_EXCEPTION_AUDIT.md), [AI 인용 검사](FEATURE_AI_VALIDATION.md)의 전제와 결과 해석을 따른다. `ask`·`explain`은 잘못된 인용이나 JSON 형식을 오류로 처리하며 검증되지 않은 모델 원문을 대신 출력하지 않는다.
 
 
-## v0.6.0 원격 복구 묶음
+## v0.7.0 원격 복구 묶음
 
 prepare를 제외한 아래 명령은 `argos vault --vault-config FILE bundle ...` 형태로 호출한다. 준비·출력 경로는 현재 계정 소유의 전용 0700 부모 아래 새 절대 경로를 사용한다.
 
 | 명령 | 동작 |
 | --- | --- |
 | `prepare --file FILE --out NEW_STAGE --original-path /PATH [--version N] [--plan TOML] [--review-history JSON]` | 최대 1GiB를 16MiB 청크와 manifest로 준비. 통신 없음 |
-| `enqueue --stage STAGE --directory QUEUE [--max-items 1000 --max-bytes 268435456]` | 검증 청크를 큐에 고정. 통신 없음·부분 등록 보존 |
+| `enqueue --stage STAGE --directory QUEUE [--max-items 1000 --max-bytes 268435456]` | 구성 목록과 모든 고유 청크·자동 게시 작업을 함께 고정. 통신 없음 |
 | `publish --manifest STAGE/manifest.json` | manifest 등록 및 모든 청크/전체 해시 완료 검사. 누락 시 실패 |
 | `upload --stage STAGE` | 직접 업로드 후 완료. 같은 stage로 재시도 가능 |
 | `list --agent-id ID [--after CURSOR --limit 100]` | 관리자 원격 목록. 최대 100개/페이지 |
@@ -172,4 +172,10 @@ prepare를 제외한 아래 명령은 `argos vault --vault-config FILE bundle ..
 | `fetch --agent-id ID --id BUNDLE_ID --out NEW_FILE [--evidence-only]` | 청크·전체 해시와 현재 판정 확인 후 새 파일 재조립 |
 | `test --agent-id ID --id BUNDLE_ID --out NEW_DIR` | 내장 계획의 backup_path만 변경해 DB 시험·보고서 일관성·최종 good 재확인 |
 
-일반 fetch/test는 unknown·revoked·미완료를 거부한다. evidence-only는 완성된 조사 자료만 허용하며 복구 추천이 아니다. test는 stdout 단일 JSON과 bundle-test.json을 기록하고, 실패 시 recommended=false 및 0이 아닌 종료 코드를 반환한다. report_authenticated=false는 서버 검토 서명과 구분한다. [전체 예시·오류·출력](FEATURE_RECOVERY_BUNDLE_CLI.md)을 참고한다.
+일반 fetch/test는 unknown·revoked·미완료를 거부한다. complete+unknown의 `test --preapproval`는 별도 격리 시험만 허용한다. evidence-only는 완성된 조사 자료만 허용하며 복구 추천이 아니다. test는 stdout 단일 JSON과 bundle-test.json을 기록하고, 실패 시 recommended=false 및 0이 아닌 종료 코드를 반환한다. report_authenticated=false는 서버 검토 서명과 구분한다. [전체 예시·오류·출력](FEATURE_RECOVERY_BUNDLE_CLI.md)을 참고한다.
+
+## v0.7.0 작업 상태와 승인 전 시험
+
+`vault queue jobs --directory QUEUE`, `show-bundle --directory QUEUE --id BUNDLE_ID`는 고정 구성 목록·게시 단계·재시도·완료를 읽는다. 토큰이나 에이전트 설정을 읽지 않는다. `queue drain --max-items N`은 청크와 게시 HTTP 시도의 합계 예산이며 `failed_jobs`도 비영 종료에 반영한다. 등록 성공 후 stage를 제거해도 이어 실행한다.
+
+`vault bundle test --preapproval --agent-id ID --id BUNDLE_ID --out NEW_DIR`는 unknown만 허용한다. SQLite는 지원하는 Linux GNU x86_64+bubblewrap 환경이 필요하고 격리 불가 시 거부한다. 성공 결과의 trial_passed와 운영 복구 승인은 별도이며 recommended/operational_restore_authorized는 false다. [상태 해석](FEATURE_BUNDLE_OPERATIONS.md)을 참고한다.

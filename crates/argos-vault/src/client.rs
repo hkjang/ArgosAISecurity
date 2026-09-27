@@ -63,6 +63,10 @@ fn request_error(error: &reqwest::Error) -> ClientError {
     }
 }
 
+pub(crate) fn transport_error(error: reqwest::Error) -> Box<dyn std::error::Error + Send + Sync> {
+    Box::new(request_error(&error))
+}
+
 fn body_error(error: std::io::Error) -> ClientError {
     if error.kind() == std::io::ErrorKind::TimedOut {
         ClientError::Timeout
@@ -86,6 +90,8 @@ pub struct VaultConfig {
     pub pinned_pubkey: String,
     pub key_id: String,
     pub allow_http_loopback: bool,
+    /// 사설 PKI를 위한 명시적 PEM 신뢰 목록. 지정하면 내장 CA 대신 이 목록만 사용한다.
+    pub tls_ca_pem: Option<String>,
     pub max_object_bytes: usize,
     pub timeout_secs: u64,
 }
@@ -99,6 +105,7 @@ impl Default for VaultConfig {
             pinned_pubkey: String::new(),
             key_id: "vault-1".into(),
             allow_http_loopback: false,
+            tls_ca_pem: None,
             max_object_bytes: MAX_OBJECT_BYTES,
             timeout_secs: 30,
         }
@@ -136,6 +143,10 @@ pub(crate) fn validated_endpoint(config: &VaultConfig) -> Result<reqwest::Url> {
     {
         return Err(ClientError::ClientSettings.into());
     }
+    if config.tls_ca_pem.is_some() && url.scheme() != "https" {
+        return Err(ClientError::ClientSettings.into());
+    }
+    tls_certificates(config)?;
     public_key(&config.pinned_pubkey).map_err(|_| ClientError::ClientSettings)?;
     if !valid_id(&config.key_id)
         || !(1..=MAX_OBJECT_BYTES).contains(&config.max_object_bytes)
@@ -146,6 +157,27 @@ pub(crate) fn validated_endpoint(config: &VaultConfig) -> Result<reqwest::Url> {
     }
     Ok(url)
 }
+
+fn tls_certificates(config: &VaultConfig) -> Result<Vec<reqwest::Certificate>> {
+    let Some(pem) = &config.tls_ca_pem else {
+        return Ok(Vec::new());
+    };
+    if pem.is_empty() || pem.len() > 64 * 1024 {
+        return Err(ClientError::ClientSettings.into());
+    }
+    let certificates = reqwest::Certificate::from_pem_bundle(pem.as_bytes())
+        .map_err(|_| ClientError::ClientSettings)?;
+    if certificates.is_empty() || certificates.len() > 16 {
+        return Err(ClientError::ClientSettings.into());
+    }
+    Ok(certificates)
+}
+
+/// 임대/재시도 중 TLS 신뢰 대상을 바꾸어 토큰과 스냅샷을 다른 서버에 보내지 않는다.
+pub(crate) fn tls_ca_sha256(config: &VaultConfig) -> Result<Option<String>> {
+    tls_certificates(config)?;
+    Ok(config.tls_ca_pem.as_ref().map(|pem| sha256(pem.as_bytes())))
+}
 pub(crate) fn connection(
     config: &VaultConfig,
 ) -> Result<(reqwest::blocking::Client, reqwest::Url)> {
@@ -153,6 +185,12 @@ pub(crate) fn connection(
     let mut builder = reqwest::blocking::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(config.timeout_secs));
+    if config.tls_ca_pem.is_some() {
+        builder = builder.tls_built_in_root_certs(false);
+        for certificate in tls_certificates(config)? {
+            builder = builder.add_root_certificate(certificate);
+        }
+    }
     // 명시적 loopback HTTP가 환경변수 프록시를 통해 외부로 전달되지 않게 한다.
     if url.scheme() == "http" {
         builder = builder.no_proxy();

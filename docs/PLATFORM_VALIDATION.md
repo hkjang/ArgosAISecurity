@@ -1,6 +1,6 @@
 # 검증 가능한 보안 플랫폼: 구현과 검증 기록
 
-기준: `v0.6.0`과 이전 릴리즈 검증 기록. v0.6.0 검증일: 2026-09-27. v0.5.0 검증일: 2026-09-27. v0.4.0 검증일: 2026-09-27. v0.3.0 검증일: 2026-09-27. v0.2.0 릴리즈 검증일: 2026-09-27, v0.1.0 검증일: 2026-09-26. 자동 차단 기본값은 계속 비활성이다.
+기준: `v0.7.0`과 이전 릴리즈 검증 기록. v0.7.0 검증일: 2026-09-27. v0.6.0 검증일: 2026-09-27. v0.5.0 검증일: 2026-09-27. v0.4.0 검증일: 2026-09-27. v0.3.0 검증일: 2026-09-27. v0.2.0 릴리즈 검증일: 2026-09-27, v0.1.0 검증일: 2026-09-26. 자동 차단 기본값은 계속 비활성이다.
 
 ## 구현 범위
 
@@ -18,6 +18,33 @@
 | 인증/격리 | 운영 관리자/개별 에이전트 토큰 필수, loopback 개발 모드, 비밀값 마스킹, 명시적 관리 IP·방향·포트만 허용, IPv4/IPv6 INPUT/OUTPUT/FORWARD 제한 |
 | 조사 | 기간·PID 기반 근거 조회, 조회 누락·근거 ID, Anthropic/Ollama 설정, 조회형 MCP, 시간순 재생 HTML, 복구 준비도 HTML |
 | 증거 패키지 | 기본 문자열 마스킹, 사건 근거·대응 이력·수락 정책 스냅샷, SHA-256 manifest 및 파일 목록 검증 |
+
+## v0.7.0 자동 재개·승인 전 격리·취소 우선 처리
+
+- 워크스페이스 **275개 통과**, 실패 0개. 기본 제외한 PostgreSQL 18.6 복원·SQLite 실제 namespace 시험 **2개도 별도 통과**했다. Linux x86_64·Rust 1.93.1·WSL2 커널 6.6.87.2 환경이다.
+- 큐는 구성 목록·고유 청크·게시 작업의 원자 등록, stage 삭제 뒤 단계별 재개, 원격 완료 ACK 유실·임대 교체, v1/v2→v3 보존을 검증했다. 번들 및 단일 객체의 기존 pending 청크 유실·같은 크기 변조도 거부하며 원본·DB를 보존했다. 누적 **1,001건 전송** 회귀도 포함한다.
+- HTTP 장애 시험은 A의 서명된 제어 객체 게시 뒤 카탈로그 연결 실패를 주입하고 B의 목록·조회·복구가 서버 재시작 후에도 가능한지 확인했다. 귀속 불명 제어 기록·카탈로그 유실은 전역 보류했다.
+- 일반 용량 포화 중 취소, 별도 취소 예산 소진 뒤 영속 의도에 의한 복구 보류, 서버/에이전트의 객체·바이트 예산, 미게시 정상 승인 의도 보존 및 기게시 승인 재결합을 확인했다. 완료 검증을 멈춘 상태에서도 취소가 2초 안에 응답했고, 잠금 밖 검증 뒤 파일 inode가 바뀌면 완료 게시를 거부했다. 실시간 응답 SLA를 뜻하지는 않는다.
+- 실제 SQLite 격리 시험에서 호스트 경로·네트워크·읽기 전용 입력 접근 제한을 검사했다. 최초 추가 시험은 CLOEXEC를 해제한 호스트 파일 FD가 bubblewrap에 상속되는 결함을 재현했다. SQLite와 PostgreSQL 승인 전 worker의 exec 경계에서 close_range(CLOEXEC)를 적용한 뒤 파일·TCP 소켓 FD 접근 거부를 확인했다. 이 경로는 Linux 5.11 이상 기능이 없으면 실패한다.
+- 작업자가 먼저 종료하고 같은 그룹 자식이 pipe를 유지하는 fixture를 200ms 제한으로 검사했다. Linux waitid(WNOWAIT)로 leader PID를 정리 시점까지 보존하고 그룹 종료·회수를 확인하여 재사용된 PID에 신호를 보내는 경로를 피했다.
+
+- 최적화 빌드가 성공했고 릴리스 바이너리로 **41개 시나리오 모두 통과**했다: 보관 4·영속성 7·큐 운영 3·SQLite/PostgreSQL 서비스 복구 15·대용량 번들 7·TLS/자동 재개/승인 전 시험 5개다.
+- 임시 TLS 프록시에서 CA 신뢰 누락·호스트명 불일치·등록 후 CA 변경을 거부했다. stage 삭제와 게시 직전 SIGKILL, 실제 임대 만료, 서버 완료 뒤 ACK 유실·재시작을 거쳐 수동 publish 없이 게시를 완료했다.
+- SQLite·PostgreSQL의 unknown 시험 성공 뒤 원격 판정 유지·기본 fetch 거부를 확인했다. 명시적 good 뒤 일반 시험이 가능하고 revoked는 승인 전 시험도 거부했다. PostgreSQL 18.6 native dump는 2,723바이트였고 원본·계획·stage를 삭제했다. 고정 worker와 native PG 자식 17개에서 호스트 파일·TCP FD 부재를 관찰했으며 종료 뒤 시험 서버가 남지 않았다.
+- 기존 대용량 회귀는 **70,332,416바이트·5청크** SQLite 백업으로 원본 디렉터리 삭제 뒤 전체 해시·스키마·쓰기/롤백·서버 재시작·취소 상태를 재확인했다.
+- 문서 상대 링크 **427개**, 앵커 **39개**, TOML 예제 **17개**, 사이트 JSON-LD·JavaScript 문법과 변경 Rust 포맷·diff 검사를 통과했다.
+
+```bash
+cargo test --workspace --offline --locked
+ARGOS_TEST_POSTGRES_ROOT=/path/to/trusted/postgresql/root cargo test -p argos-recovery --offline --locked postgresql_custom_archive -- --ignored
+cargo test -p argos-cli --offline --locked service_recovery::sqlite_sandbox::tests::sandbox_hides_host_files_network_and_allows_only_private_workspace -- --ignored --exact
+cargo build --release --workspace --offline --locked
+python3 scripts/bundle-operations-scenarios.py --bin-dir target/release --pg-root /path/to/trusted/postgresql/root --report /tmp/argos-bundle-operations-new.json
+```
+
+시험 통과와 원격 good 판정은 독립이다. 승인 전 성공 결과도 `recommended=false`, `operational_restore_authorized=false`이며 보고서는 무서명이다. 취소 예약은 한정된 논리 예산·물리 여유 정책이고 실제 물리 ENOSPC·전원 차단의 성공을 보장하지 않는다. 자료 귀속을 검증할 수 없는 장애는 전역 보류한다. [운영 흐름](FEATURE_BUNDLE_OPERATIONS.md), [큐 이전](FEATURE_BUNDLE_JOBS.md), [취소 자원](FEATURE_VAULT_CAPACITY.md)을 따른다.
+
+이번 시험은 한 호스트의 임시 경로·loopback TLS와 별도 namespace에서 수행했다. 실제 에이전트·보관·복구 서버 **3대 분리**, 운영 TLS 프록시/인증서 배포, 물리 네트워크·디스크 장애·운영 DB 성능·전체 서비스 RPO/RTO는 미검증이다. 보관 서버의 키 교체·재해복구·주기적 실물 검사와 개인별 검토 권한은 후속이다.
 
 ## v0.6.0 분할 보관·원본 로컬 자료 없는 복구
 

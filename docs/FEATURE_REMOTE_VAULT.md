@@ -69,6 +69,8 @@ argos vault verify --file /secure/export/incident-42.json \
 
 클라이언트는 HTTPS를 요구하고 리다이렉트를 따르지 않는다. URL 안의 사용자명·비밀번호·경로·질의·fragment는 거부한다. 시험용 HTTP는 `allow_http_loopback=true`와 숫자 loopback 주소를 함께 지정해야 한다. `localhost` 같은 DNS 이름을 loopback으로 추정하지 않고 시험용 HTTP에서는 환경변수 프록시도 사용하지 않는다. HTTP 요청은 기본 30초, 최대 300초 제한이다.
 
+v0.7.0은 선택적 `tls_ca_pem` 문자열로 사설 CA 목록을 지정한다. 최대 64KiB·16개 인증서이며 지정하면 내장 CA 대신 해당 목록만 신뢰한다. 호스트명·체인 검사는 유지하고 HTTP와의 혼용을 거부한다. 큐는 PEM 원문 SHA-256을 대상에 고정하므로 미완료 전송 중 신뢰 목록을 바꾸면 거부한다. 보관 서버의 서명키 교체와 별개다. [TLS·장애 시험](FEATURE_BUNDLE_OPERATIONS.md)을 참고한다.
+
 응답은 최대 16 KiB로 읽고 고정 공개키의 서명, 요청한 키 ID·에이전트 ID·종류·해시·크기를 검증한다. 서버가 돌려준 공개키를 자동 신뢰하지 않는다. 키 ID는 공개키를 대신하지 않으며 수신증명 파일만으로 신뢰 키를 선정하지 않는다.
 
 ## 정상본·증거 패키지 연계

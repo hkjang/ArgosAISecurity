@@ -1,7 +1,7 @@
 # Argos AI Security
 
 AI 기반 Linux 서버 보안 플랫폼 (랜섬웨어 탐지·차단·복구). Rust 워크스페이스.
-현재 릴리즈: v0.6.0. 제품 목표와 미구현 요구는 docs/REQUIREMENTS.md, 실제 구현 경계는 docs/ARCHITECTURE.md와 docs/ROADMAP.md, 실행 검증 범위는 docs/PLATFORM_VALIDATION.md를 확인한다. 기능 추가 전 요건서와 현재 코드를 함께 확인한다.
+현재 릴리즈: v0.7.0. 제품 목표와 미구현 요구는 docs/REQUIREMENTS.md, 실제 구현 경계는 docs/ARCHITECTURE.md와 docs/ROADMAP.md, 실행 검증 범위는 docs/PLATFORM_VALIDATION.md를 확인한다. 기능 추가 전 요건서와 현재 코드를 함께 확인한다.
 
 ## 빌드/테스트
 
@@ -12,7 +12,7 @@ cargo run -p argos-agent              # 데몬 (argos.toml 또는 기본값)
 cargo run -p argos-cli -- status      # CLI (바이너리 이름: argos)
 ```
 
-notify 기반 개발과 비 Linux 조건부 컴파일 경계를 유지한다. v0.6.0 배포·실행 검증은 Linux x86_64 기준이다.
+notify 기반 개발과 비 Linux 조건부 컴파일 경계를 유지한다. v0.7.0 배포·실행 검증은 Linux x86_64 기준이다.
 Linux 전용 코드는 `#[cfg(target_os = "linux")]`로 격리할 것 — cfg 없이 libc 시그널/fanotify 코드를 넣지 말 것.
 
 실제 CLI·에이전트 검증은 `scripts/smoke-test.sh`, `scripts/platform-smoke.py`, `scripts/security-scenarios.py`를 사용한다. 사용자/네트워크 네임스페이스에서 격리를 검증하는 `scripts/test-isolation-netns.py`도 있다. 운영 호스트의 방화벽을 직접 바꾸는 시험으로 대체하지 않는다. 각 실행 파일 경로 지정법과 검증 한계는 검증 기록을 참고한다.
@@ -44,4 +44,6 @@ Linux 전용 코드는 `#[cfg(target_os = "linux")]`로 격리할 것 — cfg �
 
 보관 전송은 `vault queue enqueue`가 당시 바이트와 목적지/공개키를 고정하며, 명시적인 `drain`이 SQLite 상태를 갱신한다. 선택 설치한 systemd timer가 drain을 예약 실행한다. 완료 수신증명은 별도 archive 테이블로 이동하며 자동 삭제하지 않는다. 활성 항목 수와 총 archive 예약 슬롯 상한을 구별한다. 네트워크 전송 중 전체 flock을 유지하지 않고 토큰/만료 시각이 있는 항목 임대를 사용한다. 서버는 Linux 작성자 잠금·시작 시 용량 재구성·신규 요청 한도를 검사한다. 복구 v2 보고서의 `verify`는 계획/기대값/백업 해시·검사 결과·나이를 대조하지만 무서명 보고서의 출처를 인증하지 않는다. `scripts/durability-scenarios.py`로 실제 CLI 경계를 시험한다.
 
-복구 묶음은 `argos-vault::bundle` 및 서버의 bundle 모듈과 CLI `vault_bundle.rs`로 구현한다. 백업 한 파일(최대 1GiB)을 16MiB 청크로 나누며 원본 에이전트 설정·DB 없이 원격 list/review/fetch/test를 수행한다. 큐 전송 뒤 manifest publish/complete가 별도로 필요하다. 원격 판정은 최초 unknown이고 관리자 검토만 good/revoked를 추가한다. 내장 계획의 backup_path만 새 파일로 바꾸며 기존 supervise_report의 시간·프로세스·출력 제한을 유지한다. 서버의 서명 완료/검토와 report_authenticated=false인 로컬 시험을 혼동하지 않는다. 사건 3파일 자동 원자 묶음, 로컬 정상본 취소 자동 전파, 시험 실행자 서명은 후속이다. 상세 절차는 docs/FEATURE_RECOVERY_BUNDLE_CLI.md를 따른다.
+복구 묶음은 `argos-vault::bundle` 및 서버의 bundle 모듈과 CLI `vault_bundle.rs`로 구현한다. 백업 한 파일(최대 1GiB)을 16MiB 청크로 나누며 원본 에이전트 설정·DB 없이 원격 list/review/fetch/test를 수행한다. bundle enqueue는 manifest·청크·게시 작업을 schema v3 큐에 함께 고정하며 drain이 register/complete를 자동 재개한다. 원격 판정은 최초 unknown이고 관리자 검토만 good/revoked를 추가한다. 내장 계획의 backup_path만 새 파일로 바꾸며 기존 supervise_report의 시간·프로세스·출력 제한을 유지한다. 서버의 서명 완료/검토와 report_authenticated=false인 로컬 시험을 혼동하지 않는다. 사건 3파일 자동 원자 묶음, 로컬 정상본 취소 자동 전파, 시험 실행자 서명은 후속이다. 상세 절차는 docs/FEATURE_RECOVERY_BUNDLE_CLI.md를 따른다.
+
+승인 전 `test --preapproval`는 complete+unknown만 허용하고 성공해도 recommended/operational_restore_authorized=false다. SQLite는 Linux x86_64 GNU+bwrap 전용 격리를 사용하고 불가하면 거부한다. PG는 기존 namespace 경계를 유지한다. 보관 서버의 취소 예약은 한정된 논리 예산·물리 여유 정책이며 ENOSPC를 무조건 해결하지 않는다. 귀속을 검증한 번들 오류만 개별 보류하고 귀속 불명·카탈로그 유실은 전역 보류한다. 사설 TLS CA는 tls_ca_pem에 명시하고 큐 대상에 그 원문 SHA-256을 고정한다.

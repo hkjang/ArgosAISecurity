@@ -1,7 +1,7 @@
 # Argos 시스템·인프라 운영자 가이드
 
 운영자는 에이전트 가동, 센서·백업·전송 상태, 디스크 용량과 실제 파일 복구를 담당한다.
-이 문서는 v0.6.0 기준이다. 정책 승인·서명은 [보안 관리자](ROLE_ADMINISTRATOR.md),
+이 문서는 v0.7.0 기준이다. 정책 승인·서명은 [보안 관리자](ROLE_ADMINISTRATOR.md),
 사건 조사와 증거 인계는 [분석가](ROLE_ANALYST.md) 가이드와 연결한다.
 
 ## 설치와 설정
@@ -122,8 +122,12 @@ argos --config /etc/argos/argos.toml restore /srv/data/report.txt --before-ms 17
 v0.5.0부터 [예약 전송](FEATURE_VAULT_SCHEDULER.md)을 선택 설치할 수 있다. pending/leased/failed 상태와 archive 예약 슬롯을 점검하고, 완료 수신증명은 [별도 내보내기](FEATURE_VAULT_QUEUE.md)로 보관한다. 업그레이드 전에 구버전 작업자를 모두 종료한다.
 
 
-## v0.6.0 원본 서버 없는 복구 운영
+## v0.7.0 원본 서버 없는 복구 운영
 
-[CLI 절차](FEATURE_RECOVERY_BUNDLE_CLI.md)에 따라 최대 1GiB 백업을 prepare한 뒤 직접 upload하거나 enqueue → queue drain → publish를 수행한다. 기본 큐 바이트 상한은 256MiB이며 청크 전송 완료와 번들 완료를 구별한다. 예약 전송은 청크를 처리하지만 publish를 자동 실행하지 않는다.
+[CLI 절차](FEATURE_RECOVERY_BUNDLE_CLI.md)에 따라 최대 1GiB 백업을 prepare한 뒤 직접 upload하거나 enqueue → queue drain의 자동 게시를 수행한다. 기본 큐 바이트 상한은 256MiB이며 청크 전송 완료와 번들 완료를 구별한다. 예약 전송도 청크와 게시 작업을 함께 재개한다.
 
-새 호스트에서는 관리자 보관 설정과 고정 공개키만으로 list/show/fetch/test를 수행하며 원본 에이전트 DB가 필요하지 않다. 새 0700 부모·새 출력 경로를 사용한다. test는 현재 good인 완성 묶음과 내장 계획이 필요하며 backup_path만 바꾼다. bundle-test.json의 recommended와 failure_code를 확인한다. 시험 결과는 무서명이고 최종 조회 뒤 판정이 바뀔 수 있으므로 운영 복원 직전 현재 상태를 다시 확인한다.
+새 호스트에서는 관리자 보관 설정과 고정 공개키만으로 list/show/fetch/test를 수행하며 원본 에이전트 DB가 필요하지 않다. 새 0700 부모·새 출력 경로를 사용한다. 일반 test는 현재 good인 완성 묶음과 내장 계획이 필요하며 backup_path만 바꾼다. unknown에는 명시적 test --preapproval로 격리 시험을 수행할 수 있고 성공해도 운영 복구는 승인되지 않는다. bundle-test.json의 recommended와 failure_code를 확인한다. 시험 결과는 무서명이고 최종 조회 뒤 판정이 바뀔 수 있으므로 운영 복원 직전 현재 상태를 다시 확인한다.
+
+## v0.7.0 운영 흐름
+
+등록 성공한 번들은 stage가 사라져도 queue drain/timer가 게시를 이어 수행한다. queue jobs의 대기/임대/완료와 failed_jobs를 점검한다. 예약 작업 활성화만으로 보관·승인·시험 성공을 가정하지 않는다. [상태·재개·취소 안내](FEATURE_BUNDLE_OPERATIONS.md)를 따른다.

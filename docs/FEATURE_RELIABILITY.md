@@ -72,4 +72,4 @@ argos --config /etc/argos/argos.toml policy status --limit 100
 
 v0.4.0의 [원격 파일 전송 큐](FEATURE_VAULT_QUEUE.md)는 중앙 이벤트 outbox와 별개다. 명시적 CLI 등록/전송이며 에이전트의 자동 백업 업로드나 중앙 상태 보고에 아직 연결하지 않는다. 서버의 [용량 상태](FEATURE_VAULT_CAPACITY.md)는 관리자 조회 명령으로 확인한다.
 
-v0.5.0부터 이미 등록한 자료는 [선택적 systemd 예약 전송](FEATURE_VAULT_SCHEDULER.md)으로 처리할 수 있다. v0.6.0의 [분할 복구 묶음](FEATURE_RECOVERY_BUNDLE.md)은 청크를 같은 큐로 전송한 뒤 별도 완료 게시를 수행한다. 큐 전송 완료·묶음 완료·현재 정상 판정·DB 시험 성공은 각각 확인하며 중앙 생존 상태 통합은 후속이다.
+v0.5.0부터 이미 등록한 자료는 [선택적 systemd 예약 전송](FEATURE_VAULT_SCHEDULER.md)으로 처리할 수 있다. v0.7.0의 [영속 번들 작업](FEATURE_BUNDLE_JOBS.md)은 구성 목록과 청크·완료 작업을 등록하고 중단 후 자동 재개한다. 큐 전송 완료·묶음 완료·현재 정상 판정·DB 시험 성공은 각각 확인하며 중앙 생존 상태 통합은 후속이다.

@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "argos-agent"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "argos-detect",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "argos-brain"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "argos-storage",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "argos-central"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "axum",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "argos-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-brain",
  "argos-common",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "argos-common"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "argos-detect"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "libc",
@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "argos-policy"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "argos-detect",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "argos-recovery"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "hex",
@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "argos-response"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "libc",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "argos-sensor"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "libc",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "argos-storage"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "argos-common",
  "rusqlite",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "argos-vault"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "axum",
  "clap",

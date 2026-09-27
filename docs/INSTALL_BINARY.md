@@ -1,17 +1,17 @@
 # Linux 바이너리 설치
 
-v0.6.0 패키지는 x86_64 Linux와 **glibc 2.39 이상**을 요구한다. `libgcc_s.so.1`, `libm.so.6`, `libc.so.6`, `/lib64/ld-linux-x86-64.so.2`가 필요하다. 배포판의 glibc가 더 오래되었거나 아키텍처가 다르면 태그 소스에서 `cargo build --release --workspace --locked`로 빌드한다. Linux 소스 빌드 최소 Rust 버전은 1.86이고, 릴리즈 검증 버전은 1.93.1이다.
+v0.7.0 패키지는 x86_64 Linux와 **glibc 2.39 이상**을 요구한다. `libgcc_s.so.1`, `libm.so.6`, `libc.so.6`, `/lib64/ld-linux-x86-64.so.2`가 필요하다. 배포판의 glibc가 더 오래되었거나 아키텍처가 다르면 태그 소스에서 `cargo build --release --workspace --locked`로 빌드한다. Linux 소스 빌드 최소 Rust 버전은 1.86이고, 릴리즈 검증 버전은 1.93.1이다.
 
-[v0.6.0 GitHub 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.6.0)에서 압축 파일과 `SHA256SUMS`를 같은 새 디렉터리에 내려받고 검증한다. [릴리즈 노트](releases/v0.6.0.md)에 기능 변경과 정책 설정 이전 절차가 있다.
+[v0.7.0 GitHub 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.7.0)에서 압축 파일과 `SHA256SUMS`를 같은 새 디렉터리에 내려받고 검증한다. [릴리즈 노트](releases/v0.7.0.md)에 기능 변경과 정책 설정 이전 절차가 있다.
 
 ```bash
-mkdir argos-v0.6.0-download
-cd argos-v0.6.0-download
-curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.6.0/argos-v0.6.0-linux-x86_64-gnu.tar.gz
-curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.6.0/SHA256SUMS
+mkdir argos-v0.7.0-download
+cd argos-v0.7.0-download
+curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.7.0/argos-v0.7.0-linux-x86_64-gnu.tar.gz
+curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.7.0/SHA256SUMS
 sha256sum -c SHA256SUMS
-tar -xzf argos-v0.6.0-linux-x86_64-gnu.tar.gz
-cd argos-v0.6.0-linux-x86_64-gnu
+tar -xzf argos-v0.7.0-linux-x86_64-gnu.tar.gz
+cd argos-v0.7.0-linux-x86_64-gnu
 ./bin/argos --version
 ./bin/argos --help
 ```
@@ -40,7 +40,7 @@ mkdir -p watched argos-data
 
 ## systemd 서비스
 
-기존 설치를 교체할 때는 먼저 서비스를 중지하고 설정, 이벤트 DB 및 백업 저장소를 보관한다. 서명 정책을 사용하면 정책 상태 디렉터리도 함께 보관하고 [정책 설정 이전](FEATURE_POLICY.md#이전-설정에서-이전하기)을 먼저 완료한다. v0.1.0의 `policy.pubkey`만 있는 정책은 v0.6.0 운영 활성화에서 거부된다. 설치 예시는 다음과 같다. 기존 `/etc/argos/argos.toml`은 덮어쓰지 않는다.
+기존 설치를 교체할 때는 먼저 서비스를 중지하고 설정, 이벤트 DB 및 백업 저장소를 보관한다. 서명 정책을 사용하면 정책 상태 디렉터리도 함께 보관하고 [정책 설정 이전](FEATURE_POLICY.md#이전-설정에서-이전하기)을 먼저 완료한다. v0.1.0의 `policy.pubkey`만 있는 정책은 v0.7.0 운영 활성화에서 거부된다. 설치 예시는 다음과 같다. 기존 `/etc/argos/argos.toml`은 덮어쓰지 않는다.
 
 ```bash
 sudo install -m 0755 bin/argos bin/argos-agent bin/argos-central bin/argos-vault /usr/bin/
@@ -81,7 +81,7 @@ python3 scripts/security-scenarios.py --bin-dir "$PWD/bin"
 - 사고 인계용 내보내기와 해시 검증: [증거 패키지](FEATURE_EVIDENCE_PACKAGE.md)
 - 기간별 AI 근거 조회와 Ollama 설정: [AI 조사](FEATURE_AI.md)
 
-## v0.6.0 검증 도구 준비
+## v0.7.0 검증 도구 준비
 
 `argos-vault`는 별도 보관 호스트에 설치하고 [인증·TLS·키 설정](FEATURE_REMOTE_VAULT.md)을 적용한다. 에이전트 설치만으로 원격 보관이 활성화되지는 않는다. PostgreSQL 복구 시험에는 일반 사용자, 작동하는 `/usr/bin/bwrap`과 별도 PostgreSQL 도구가 필요하다. [복구 계획](FEATURE_SERVICE_RECOVERY.md)에 입력 형식과 검증 범위를 설명한다.
 
@@ -107,11 +107,11 @@ python3 scripts/queue-operations-scenarios.py --bin-dir "$PWD/bin"
 ```
 
 
-## v0.6.0 보관 서버 업그레이드
+## v0.6.0에서 도입한 복구 묶음
 
-백업 한 파일과 메타데이터를 16MiB 청크·최대 1GiB로 보관하는 [복구 묶음](FEATURE_RECOVERY_BUNDLE.md)이 추가됐다. 서버와 클라이언트를 함께 업그레이드하고 작업자를 중지한 상태에서 보관 저장소·카탈로그·서명키·큐를 보존한다. 번들 카탈로그와 내부 제어 객체가 생긴 저장소는 v0.5 이하 서버에 그대로 연결하지 않는다. v0.5 큐 schema v2·완료 archive와 예약 전송 방식은 유지한다.
+백업 한 파일과 메타데이터를 16MiB 청크·최대 1GiB로 보관하는 [복구 묶음](FEATURE_RECOVERY_BUNDLE.md)이 추가됐다. 서버와 클라이언트를 함께 업그레이드하고 작업자를 중지한 상태에서 보관 저장소·카탈로그·서명키·큐를 보존한다. 번들 카탈로그와 내부 제어 객체가 생긴 저장소는 v0.5 이하 서버에 그대로 연결하지 않는다. v0.6.0은 v0.5 큐 schema v2를 사용했다. 현재 v0.7.0의 schema v3 이전 절차는 아래를 따른다.
 
-새 호스트 복구에는 원본 에이전트 DB 대신 관리자 보관 설정·고정 공개키와 DB 시험 도구가 필요하다. 준비 stage, 복구 부모와 출력은 전용 경로로 만든다. [prepare → 전송 → publish → 검토 → 새 호스트 test](FEATURE_RECOVERY_BUNDLE_CLI.md) 절차를 따른다. 운영 파일 덮어쓰기·서비스 자동 시작·로컬 정상본 취소 자동 전파는 포함하지 않는다. 최신 실행 결과와 재현 명령은 [검증 기록](PLATFORM_VALIDATION.md)을 확인한다.
+새 호스트 복구에는 원본 에이전트 DB 대신 관리자 보관 설정·고정 공개키와 DB 시험 도구가 필요하다. 준비 stage, 복구 부모와 출력은 전용 경로로 만든다. [prepare → 영속 등록·자동 게시 → 격리 시험 → 검토](FEATURE_RECOVERY_BUNDLE_CLI.md) 절차를 따른다. 운영 파일 덮어쓰기·서비스 자동 시작·로컬 정상본 취소 자동 전파는 포함하지 않는다. 최신 실행 결과와 재현 명령은 [검증 기록](PLATFORM_VALIDATION.md)을 확인한다.
 
 BUILD_INFO.json의 기록과 해시는 패키지 확인 자료다. 모든 실행 파일의 소스 커밋 내장·독립 빌드 대조·서명 빌드 기록은 아직 후속이다.
 
@@ -120,3 +120,15 @@ python3 scripts/bundle-recovery-scenarios.py --bin-dir "$PWD/bin"
 ```
 
 이 시험은 동일 loopback 호스트의 별도 새 경로에서 약 67MiB 합성 SQLite 백업을 복구한다. 실제 다른 호스트·원격 TLS 배포·운영 자료의 복구 성능을 검증하는 시험은 아니다.
+
+## v0.7.0 이전
+
+기존 예약 전송과 큐 작업자를 중지하고 큐 전체를 보존한다. 첫 변경 작업이 이전 큐를 schema v3로 이관하며 이후 같은 큐에 구버전 작업자를 연결하지 않는다. 번들 enqueue 출력은 고유 청크 배열 chunk_items와 작업의 state/phase로 변경된다. [자동 재개](FEATURE_BUNDLE_JOBS.md)를 따른다.
+
+서버의 취소 예약 자원은 일반 업로드의 디스크 여유 요건에 추가 영향을 준다. [용량 기본값](FEATURE_VAULT_CAPACITY.md)을 확인하고 물리 여유를 확보한다. 승인 전 SQLite 시험은 Linux x86_64 GNU·비 root·신뢰한 bubblewrap과 런타임·Linux 5.11 이상 close_range 지원이 필요하며 무격리 대체 실행은 없다. 관리자 보관 설정의 사설 TLS CA는 [원격 보관](FEATURE_REMOTE_VAULT.md)을 따른다.
+
+```bash
+python3 scripts/bundle-operations-scenarios.py --bin-dir "$PWD/bin" --report /tmp/argos-bundle-operations-new.json
+```
+
+위 스크립트는 openssl·bubblewrap을 사용한 같은 호스트의 임시 TLS/격리 시험이다. 실제 서버 3대나 운영 인증서를 검증하지 않는다.

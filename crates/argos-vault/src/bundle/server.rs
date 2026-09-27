@@ -7,6 +7,16 @@ use rusqlite::{params, Connection, OptionalExtension};
 const CATALOG: &str = ".argos-bundles.sqlite3";
 const MARKER: &str = ".argos-bundles.ready";
 const MAX_BUNDLES: u64 = 10000;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevocationIntent {
+    format: String,
+    key_id: String,
+    agent_id: String,
+    bundle_id: String,
+    manifest_sha256: String,
+    request: ReviewRequest,
+}
 struct Catalog(Connection);
 impl Catalog {
     fn open(storage: &Storage, create: bool) -> Result<Option<Self>> {
@@ -95,17 +105,216 @@ COMMIT;")?;
         Ok(text.into_bytes())
     }
     fn coverage(&self, storage: &Storage) -> Result<()> {
-        let refs:u64=self.0.query_row("SELECT (SELECT COUNT(*)+COUNT(completion_hash) FROM bundles)+(SELECT COUNT(*) FROM reviews)",[],|r|r.get(0))?;
         let usage = storage.capacity.usage();
-        if refs != storage.capacity.bundle_control_objects
-            || !usage.reconstruction_complete
+        if !usage.reconstruction_complete
             || !usage.storage_consistent
+            || storage.capacity.bundle_control_owners.values().sum::<u64>()
+                != storage.capacity.bundle_control_objects
         {
-            return Err("번들 제어 객체/카탈로그 불일치: 완료/정상 판정 조회 보류".into());
+            return Err("소유 번들을 확인할 수 없는 보관 상태: 전체 추천 보류".into());
+        }
+        // 카탈로그 구조 손상/잘못된 신원은 특정 번들 장애로 축소하지 않는다.
+        let mut stmt = self.0.prepare("SELECT agent,id FROM bundles LIMIT 10001")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for (index, row) in rows.enumerate() {
+            let (agent, id) = row?;
+            if index >= MAX_BUNDLES as usize || !valid_id(&agent) || !valid_bundle_id(&id) {
+                return Err("카탈로그 전역 신원/상한 오류".into());
+            }
         }
         Ok(())
     }
+    /// 검증된 제어 객체의 소유 번들만 보류한다. 재시도는 영속 의도와 정확히 같은
+    /// 추가 객체만 허용하며, 누락된 최신 검토를 새 검토로 덮어 지나가지 않는다.
+    fn bundle_coverage(
+        &self,
+        storage: &Storage,
+        agent: &str,
+        id: &str,
+        record: &BundleRecord,
+        repair: bool,
+    ) -> Result<()> {
+        self.coverage(storage)?;
+        let mut expected = 1 + u64::from(record.completion.is_some()) + record.reviews.len() as u64;
+        if repair {
+            for operation in ["complete", "review"] {
+                let pending: Option<String> = self
+                    .0
+                    .query_row(
+                        "SELECT payload FROM intents WHERE agent=?1 AND bundle=?2 AND operation=?3",
+                        params![agent, id, operation],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if let Some(pending) = pending {
+                    if pending.len() > MAX_MANIFEST_BYTES {
+                        return Err("게시 의도 크기 오류".into());
+                    }
+                    let mut check = record.clone();
+                    if operation == "complete" {
+                        if record.completion.is_some() {
+                            return Err("완료 의도/상태 충돌".into());
+                        }
+                        check.completion = Some(serde_json::from_str(&pending)?);
+                    } else {
+                        let event: Signed<ReviewEvent> = serde_json::from_str(&pending)?;
+                        check.current_review = match event.value.request.decision {
+                            ReviewDecision::Good => "good",
+                            ReviewDecision::Revoked => "revoked",
+                        }
+                        .into();
+                        check.recommended = check.current_review == "good";
+                        check.reviews.push(event);
+                    }
+                    verify_record(
+                        &check,
+                        &hex::encode(storage.key.verifying_key().to_bytes()),
+                        &storage.config.key_id,
+                    )?;
+                    let hash = sha256(pending.as_bytes());
+                    let (blob, receipt) = storage.paths(agent, &hash);
+                    if blob.symlink_metadata().is_ok() || receipt.symlink_metadata().is_ok() {
+                        let (r, bytes) = storage.get(agent, &hash)?;
+                        let kind = if operation == "complete" {
+                            "bundle-completion"
+                        } else {
+                            "bundle-review"
+                        };
+                        if r.receipt.kind != kind || bytes != pending.as_bytes() {
+                            return Err("게시 의도 객체 불일치".into());
+                        }
+                        expected += 1;
+                    }
+                }
+            }
+        }
+        let actual = storage
+            .capacity
+            .bundle_control_owners
+            .get(&(agent.into(), id.into()))
+            .copied()
+            .unwrap_or(0);
+        if expected != actual {
+            return Err("해당 번들 제어 객체/카탈로그 불일치: 복구 보류".into());
+        }
+        Ok(())
+    }
+    fn has_revocation_intent(&self, agent: &str, id: &str) -> Result<bool> {
+        Ok(self.0.query_row("SELECT EXISTS(SELECT 1 FROM intents WHERE agent=?1 AND bundle=?2 AND operation='revoke')",params![agent,id],|r|r.get(0))?)
+    }
+    fn retain_revocation_intent(
+        &self,
+        storage: &Storage,
+        agent: &str,
+        id: &str,
+        record: &BundleRecord,
+        request: &ReviewRequest,
+    ) -> Result<()> {
+        let signed = sign_value(
+            RevocationIntent {
+                format: "argos-bundle-revocation-intent-v1".into(),
+                key_id: storage.config.key_id.clone(),
+                agent_id: agent.into(),
+                bundle_id: id.into(),
+                manifest_sha256: record.manifest_receipt.receipt.sha256.clone(),
+                request: request.clone(),
+            },
+            &storage.key,
+        )?;
+        let bytes = self.intent(agent, id, "revoke", serde_json::to_vec(&signed)?)?;
+        let existing: Signed<RevocationIntent> = serde_json::from_slice(&bytes)?;
+        verify_value(
+            &existing,
+            &hex::encode(storage.key.verifying_key().to_bytes()),
+        )?;
+        let v = existing.value;
+        if v.format != "argos-bundle-revocation-intent-v1"
+            || v.key_id != storage.config.key_id
+            || v.agent_id != agent
+            || v.bundle_id != id
+            || v.manifest_sha256 != record.manifest_receipt.receipt.sha256
+            || v.request != *request
+        {
+            return Err("대기 중 취소 요청의 ID/내용이 다릅니다".into());
+        }
+        Ok(())
+    }
+    fn reject_superseded_request(
+        &self,
+        agent: &str,
+        id: &str,
+        request: &ReviewRequest,
+    ) -> Result<()> {
+        let mut stmt=self.0.prepare("SELECT payload FROM intents WHERE agent=?1 AND bundle=?2 AND operation GLOB 'superseded-review-*' LIMIT 101")?;
+        let rows = stmt.query_map(params![agent, id], |r| r.get::<_, String>(0))?;
+        for (index, row) in rows.enumerate() {
+            let raw = row?;
+            if index >= MAX_REVIEWS || raw.len() > MAX_MANIFEST_BYTES {
+                return Err("대체된 미완료 검토 보존 상한/형식 오류".into());
+            }
+            let event: Signed<ReviewEvent> = serde_json::from_str(&raw)?;
+            if event.value.request.request_id == request.request_id {
+                return Err("취소로 대체된 미완료 검토 요청은 재적용할 수 없습니다".into());
+            }
+        }
+        Ok(())
+    }
+    fn settle_pending_good(&self, storage: &Storage, agent: &str, id: &str) -> Result<()> {
+        let pending: Option<String> = self
+            .0
+            .query_row(
+                "SELECT payload FROM intents WHERE agent=?1 AND bundle=?2 AND operation='review'",
+                params![agent, id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(raw) = pending else {
+            return Ok(());
+        };
+        let event: Signed<ReviewEvent> = serde_json::from_str(&raw)?;
+        if event.value.request.decision != ReviewDecision::Good {
+            return Ok(());
+        }
+        // bundle_coverage(repair=true)가 서명·이력·남은 객체를 이미 검증했다.
+        let hash = sha256(raw.as_bytes());
+        let (blob, receipt) = storage.paths(agent, &hash);
+        let tx = self.0.unchecked_transaction()?;
+        if blob.symlink_metadata().is_ok() || receipt.symlink_metadata().is_ok() {
+            let (r, bytes) = storage.get(agent, &hash)?;
+            if r.receipt.kind != "bundle-review" || bytes != raw.as_bytes() {
+                return Err("미완료 정상 검토 객체 불일치".into());
+            }
+            tx.execute(
+                "INSERT INTO reviews(agent,bundle,sequence,hash,request_id) VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    agent,
+                    id,
+                    event.value.sequence,
+                    hash,
+                    event.value.request.request_id
+                ],
+            )?;
+        } else {
+            let count:u64=tx.query_row("SELECT COUNT(*) FROM intents WHERE agent=?1 AND bundle=?2 AND operation GLOB 'superseded-review-*'",params![agent,id],|r|r.get(0))?;
+            if count >= MAX_REVIEWS as u64 {
+                return Err("대체된 미완료 검토 보존 100개 상한: 취소 의도는 유지됩니다".into());
+            }
+            tx.execute(
+                "INSERT INTO intents(agent,bundle,operation,payload) VALUES(?1,?2,?3,?4)",
+                params![agent, id, format!("superseded-review-{hash}"), raw],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM intents WHERE agent=?1 AND bundle=?2 AND operation='review'",
+            params![agent, id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
     fn record(&self, storage: &Storage, agent: &str, id: &str) -> Result<BundleRecord> {
+        if self.has_revocation_intent(agent, id)? {
+            return Err("취소 의도가 영속 저장되어 완료 전까지 복구/추천을 보류합니다".into());
+        }
         let pending: Option<String> = self
             .0
             .query_row(
@@ -120,7 +329,9 @@ COMMIT;")?;
                 return Err("정상 판정 취소가 게시 대기 중이므로 복구/추천을 보류합니다".into());
             }
         }
-        self.record_raw(storage, agent, id)
+        let record = self.record_raw(storage, agent, id)?;
+        self.bundle_coverage(storage, agent, id, &record, false)?;
+        Ok(record)
     }
     fn record_raw(&self, storage: &Storage, agent: &str, id: &str) -> Result<BundleRecord> {
         let (manifest_hash, completion_hash): (String, Option<String>) = self.0.query_row(
@@ -211,12 +422,6 @@ fn register_inner(
         if existing != hash {
             return Err("동일 번들 ID의 manifest 변경 거부".into());
         }
-        let pending:bool=catalog.0.query_row("SELECT EXISTS(SELECT 1 FROM intents WHERE agent=?1 AND bundle=?2 AND operation='complete')",params![agent,manifest.bundle_id],|r|r.get(0))?;
-        if pending {
-            // 이전 완료 게시가 끊긴 동일 manifest 등록은 그 완료 의도부터 재시도한다.
-            drop(catalog);
-            return complete_inner(storage, agent, &manifest.bundle_id);
-        }
     } else {
         let count: u64 = catalog
             .0
@@ -238,59 +443,132 @@ fn register_inner(
             params![agent, manifest.bundle_id, hash],
         )?;
     }
-    catalog.coverage(storage)?;
-    catalog.record(storage, agent, &manifest.bundle_id)
-}
-fn complete_inner(storage: &mut Storage, agent: &str, id: &str) -> Result<BundleRecord> {
-    let catalog = Catalog::open(storage, false)?.ok_or("카탈로그 없음")?;
-    let record = catalog.record(storage, agent, id)?;
+    let record = catalog.record_raw(storage, agent, &manifest.bundle_id)?;
+    catalog.bundle_coverage(storage, agent, &manifest.bundle_id, &record, true)?;
     if record.completion.is_none() {
-        let mut full = Sha256::new();
-        for chunk in &record.manifest.chunks {
-            let (receipt, bytes) = storage.get(agent, &chunk.sha256)?;
-            if receipt.receipt.kind != "backup" || bytes.len() as u64 != chunk.size_bytes {
-                return Err("번들 청크/수신증명 불일치".into());
-            }
-            full.update(bytes);
-        }
-        if hex::encode(full.finalize()) != record.manifest.sha256 {
-            return Err("번들 전체 해시 불일치".into());
-        }
-        // 객체 게시 전 서명 바이트를 FULL 트랜잭션 의도로 남겨 중단 후 동일하게 재시도한다.
-        let completion = sign_value(
-            Completion {
-                format: "argos-bundle-completion-v1".into(),
-                key_id: storage.config.key_id.clone(),
-                agent_id: agent.into(),
-                bundle_id: id.into(),
-                manifest_sha256: record.manifest_receipt.receipt.sha256.clone(),
-                sha256: record.manifest.sha256.clone(),
-                size_bytes: record.manifest.size_bytes,
-                completed_at_ms: now_ms(),
-            },
-            &storage.key,
-        )?;
-        let bytes = catalog.intent(agent, id, "complete", serde_json::to_vec(&completion)?)?;
-        let stored: Signed<Completion> = serde_json::from_slice(&bytes)?;
-        let mut check = record.clone();
-        check.completion = Some(stored);
-        verify_record(
-            &check,
-            &hex::encode(storage.key.verifying_key().to_bytes()),
-            &storage.config.key_id,
-        )?;
-        let hash = sha256(&bytes);
-        storage.put(agent, &hash, "bundle-completion", &bytes)?;
-        let tx = catalog.0.unchecked_transaction()?;
-        tx.execute("UPDATE bundles SET completion_hash=?1 WHERE agent=?2 AND id=?3 AND completion_hash IS NULL",params![hash,agent,id])?;
-        tx.execute(
-            "DELETE FROM intents WHERE agent=?1 AND bundle=?2 AND operation='complete'",
-            params![agent, id],
-        )?;
-        tx.commit()?;
+        Ok(record)
+    } else {
+        catalog.record(storage, agent, &manifest.bundle_id)
     }
-    catalog.coverage(storage)?;
-    catalog.record(storage, agent, id)
+}
+#[derive(PartialEq, Eq)]
+struct FileStamp {
+    path: PathBuf,
+    len: u64,
+    modified: std::time::SystemTime,
+    #[cfg(unix)]
+    identity: (u64, u64, i64, i64, u32, u64),
+}
+impl FileStamp {
+    fn read(path: PathBuf) -> Result<Self> {
+        let m = fs::symlink_metadata(&path)?;
+        if !m.is_file() || m.file_type().is_symlink() {
+            return Err("완료 검증 대상 일반 파일 필요".into());
+        }
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Ok(Self {
+            path,
+            len: m.len(),
+            modified: m.modified()?,
+            #[cfg(unix)]
+            identity: (
+                m.dev(),
+                m.ino(),
+                m.ctime(),
+                m.ctime_nsec(),
+                m.mode(),
+                m.nlink(),
+            ),
+        })
+    }
+    fn unchanged(&self) -> Result<()> {
+        if *self != Self::read(self.path.clone())? {
+            return Err("검증 도중 보관 파일 변경: 완료 게시 보류".into());
+        }
+        Ok(())
+    }
+}
+fn complete_unlocked(shared: &Mutex<Storage>, agent: &str, id: &str) -> Result<BundleRecord> {
+    let (reader, record) = {
+        let storage = shared.lock().map_err(|_| "저장소 잠금 오류")?;
+        let catalog = Catalog::open(&storage, false)?.ok_or("카탈로그 없음")?;
+        let record = catalog.record_raw(&storage, agent, id)?;
+        catalog.bundle_coverage(&storage, agent, id, &record, true)?;
+        if record.completion.is_some() {
+            return catalog.record(&storage, agent, id);
+        }
+        let mut reader = storage.reader();
+        reader.max_object_bytes = reader.max_object_bytes.min(CHUNK_BYTES);
+        (reader, record)
+    };
+    #[cfg(test)]
+    crate::bundle::wait_completion_test_gate(&reader.dir, "before-read");
+    // 청크당 최대 16MiB, 총 최대 1GiB. 긴 읽기와 SHA-256 계산은 전역 잠금 밖이다.
+    let mut full = Sha256::new();
+    let mut stamps = Vec::new();
+    for chunk in &record.manifest.chunks {
+        let (blob, receipt) = reader.paths(agent, &chunk.sha256);
+        let before = [FileStamp::read(blob)?, FileStamp::read(receipt)?];
+        let (receipt, bytes) = reader.get(agent, &chunk.sha256)?;
+        if receipt.receipt.kind != "backup" || bytes.len() as u64 != chunk.size_bytes {
+            return Err("번들 청크/수신증명 불일치".into());
+        }
+        full.update(bytes);
+        for stamp in before {
+            stamp.unchanged()?;
+            stamps.push(stamp);
+        }
+    }
+    if hex::encode(full.finalize()) != record.manifest.sha256 {
+        return Err("번들 전체 해시 불일치".into());
+    }
+    #[cfg(test)]
+    crate::bundle::wait_completion_test_gate(&reader.dir, "before-commit");
+    let mut storage = shared.lock().map_err(|_| "저장소 잠금 오류")?;
+    let catalog = Catalog::open(&storage, false)?.ok_or("카탈로그 없음")?;
+    let current = catalog.record_raw(&storage, agent, id)?;
+    catalog.bundle_coverage(&storage, agent, id, &current, true)?;
+    if current.completion.is_some() {
+        return catalog.record(&storage, agent, id);
+    }
+    if serde_json::to_vec(&current)? != serde_json::to_vec(&record)? {
+        return Err("검증 도중 번들 상태 변경".into());
+    }
+    for stamp in stamps {
+        stamp.unchanged()?;
+    }
+    let completion = sign_value(
+        Completion {
+            format: "argos-bundle-completion-v1".into(),
+            key_id: storage.config.key_id.clone(),
+            agent_id: agent.into(),
+            bundle_id: id.into(),
+            manifest_sha256: record.manifest_receipt.receipt.sha256.clone(),
+            sha256: record.manifest.sha256.clone(),
+            size_bytes: record.manifest.size_bytes,
+            completed_at_ms: now_ms(),
+        },
+        &storage.key,
+    )?;
+    let bytes = catalog.intent(agent, id, "complete", serde_json::to_vec(&completion)?)?;
+    let mut check = record.clone();
+    check.completion = Some(serde_json::from_slice(&bytes)?);
+    verify_record(
+        &check,
+        &hex::encode(storage.key.verifying_key().to_bytes()),
+        &storage.config.key_id,
+    )?;
+    let hash = sha256(&bytes);
+    storage.put(agent, &hash, "bundle-completion", &bytes)?;
+    let tx = catalog.0.unchecked_transaction()?;
+    if tx.execute("UPDATE bundles SET completion_hash=?1 WHERE agent=?2 AND id=?3 AND completion_hash IS NULL",params![hash,agent,id])?!=1 { return Err("완료 게시 상태 충돌".into()); }
+    tx.execute(
+        "DELETE FROM intents WHERE agent=?1 AND bundle=?2 AND operation='complete'",
+        params![agent, id],
+    )?;
+    tx.commit()?;
+    catalog.record(&storage, agent, id)
 }
 fn review_inner(
     storage: &mut Storage,
@@ -300,7 +578,31 @@ fn review_inner(
 ) -> Result<BundleRecord> {
     validate_review(&request)?;
     let catalog = Catalog::open(storage, false)?.ok_or("카탈로그 없음")?;
-    let record = catalog.record_raw(storage, agent, id)?;
+    let mut record = catalog.record_raw(storage, agent, id)?;
+    catalog.bundle_coverage(storage, agent, id, &record, true)?;
+    if let Some(existing) = record
+        .reviews
+        .iter()
+        .find(|r| r.value.request.request_id == request.request_id)
+    {
+        if existing.value.request != request {
+            return Err("검토 요청 ID 재사용 내용 불일치".into());
+        }
+        return catalog.record(storage, agent, id);
+    }
+    catalog.reject_superseded_request(agent, id, &request)?;
+    if record.completion.is_none() {
+        return Err("미완료 번들의 검토는 보류합니다".into());
+    }
+    if request.decision == ReviewDecision::Revoked {
+        // 정상 판정의 미완료 게시 복구가 실패하더라도 취소 요청은 먼저 안전하게 남긴다.
+        catalog.retain_revocation_intent(storage, agent, id, &record, &request)?;
+        catalog.settle_pending_good(storage, agent, id)?;
+        record = catalog.record_raw(storage, agent, id)?;
+        catalog.bundle_coverage(storage, agent, id, &record, true)?;
+    } else if catalog.has_revocation_intent(agent, id)? {
+        return Err("대기 중 취소를 먼저 같은 ID/내용으로 완료해야 합니다".into());
+    }
     let completion = record
         .completion
         .as_ref()
@@ -360,7 +662,11 @@ fn review_inner(
             &storage.config.key_id,
         )?;
         let hash = sha256(&bytes);
-        storage.put(agent, &hash, "bundle-review", &bytes)?;
+        if event.value.request.decision == ReviewDecision::Revoked {
+            storage.put_revocation(agent, &hash, &bytes)?;
+        } else {
+            storage.put(agent, &hash, "bundle-review", &bytes)?;
+        }
         let tx = catalog.0.unchecked_transaction()?;
         tx.execute(
             "INSERT INTO reviews(agent,bundle,sequence,hash,request_id) VALUES(?1,?2,?3,?4,?5)",
@@ -370,6 +676,12 @@ fn review_inner(
             "DELETE FROM intents WHERE agent=?1 AND bundle=?2 AND operation='review'",
             params![agent, id],
         )?;
+        if event.value.request.decision == ReviewDecision::Revoked {
+            tx.execute(
+                "DELETE FROM intents WHERE agent=?1 AND bundle=?2 AND operation='revoke'",
+                params![agent, id],
+            )?;
+        }
         tx.commit()?;
     }
     catalog.coverage(storage)?;
@@ -432,14 +744,13 @@ pub(super) async fn complete(
     if !valid_bundle_id(&id) {
         return failure(StatusCode::BAD_REQUEST, "번들 ID 오류");
     }
-    let Ok(permit) = Arc::clone(&state.permits).try_acquire_owned() else {
+    let Ok(permit) = Arc::clone(&state.completion_permits).try_acquire_owned() else {
         return failure(StatusCode::SERVICE_UNAVAILABLE, "동시 요청 상한");
     };
     response(
         tokio::task::spawn_blocking(move || {
             let _p = permit;
-            let mut storage = state.storage.lock().map_err(|_| "저장소 잠금 오류")?;
-            complete_inner(&mut storage, &agent, &id)
+            complete_unlocked(&state.storage, &agent, &id)
         })
         .await,
     )
@@ -480,7 +791,7 @@ pub(super) async fn review(
     if !valid_id(&agent) || !valid_bundle_id(&id) {
         return failure(StatusCode::BAD_REQUEST, "번들 경로 오류");
     }
-    let Ok(permit) = Arc::clone(&state.permits).try_acquire_owned() else {
+    let Ok(permit) = Arc::clone(&state.control_permits).try_acquire_owned() else {
         return failure(StatusCode::SERVICE_UNAVAILABLE, "동시 요청 상한");
     };
     let bytes = match body(request).await {
@@ -533,42 +844,62 @@ pub(super) async fn list(
                 agent_id: agent,
                 items: vec![],
                 next_cursor: None,
+                unavailable: vec![],
             });
         };
         catalog.coverage(&storage)?;
+        // 카탈로그 행이 게시되기 직전에 끊긴, 소유자가 확인된 manifest도 목록에 보류로 표시한다.
         let mut stmt = catalog
             .0
-            .prepare("SELECT id FROM bundles WHERE agent=?1 AND id>?2 ORDER BY id LIMIT ?3")?;
-        let ids = stmt
-            .query_map(
-                params![agent, page.after.unwrap_or_default(), limit + 1],
-                |r| r.get::<_, String>(0),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+            .prepare("SELECT id FROM bundles WHERE agent=?1 ORDER BY id LIMIT 10001")?;
+        let mut ids = stmt
+            .query_map([&agent], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+        ids.extend(
+            storage
+                .capacity
+                .bundle_control_owners
+                .keys()
+                .filter(|(owner, _)| owner == &agent)
+                .map(|(_, id)| id.clone()),
+        );
+        let after = page.after.unwrap_or_default();
+        let ids = ids
+            .into_iter()
+            .filter(|id| id > &after)
+            .take(limit + 1)
+            .collect::<Vec<_>>();
         let more = ids.len() > limit;
         let mut items = Vec::new();
-        for id in ids.into_iter().take(limit) {
-            let r = catalog.record(&storage, &agent, &id)?;
-            items.push(BundleSummary {
-                bundle_id: id,
-                original_path: r.manifest.metadata.original_path,
-                version: r.manifest.metadata.version,
-                sha256: r.manifest.sha256,
-                size_bytes: r.manifest.size_bytes,
-                complete: r.completion.is_some(),
-                current_review: r.current_review,
-                recommended: r.recommended,
-            });
-        }
+        let mut unavailable = Vec::new();
         let next_cursor = if more {
-            items.last().map(|i| i.bundle_id.clone())
+            ids.get(limit - 1).cloned()
         } else {
             None
         };
+        for id in ids.into_iter().take(limit) {
+            match catalog.record(&storage, &agent, &id) {
+                Ok(r) => items.push(BundleSummary {
+                    bundle_id: id,
+                    original_path: r.manifest.metadata.original_path,
+                    version: r.manifest.metadata.version,
+                    sha256: r.manifest.sha256,
+                    size_bytes: r.manifest.size_bytes,
+                    complete: r.completion.is_some(),
+                    current_review: r.current_review,
+                    recommended: r.recommended,
+                }),
+                Err(_) => unavailable.push(UnavailableBundle {
+                    bundle_id: id,
+                    reason: "bundle_state_unavailable".into(),
+                }),
+            }
+        }
         Ok(BundleList {
             agent_id: agent,
             items,
             next_cursor,
+            unavailable,
         })
     })
     .await;

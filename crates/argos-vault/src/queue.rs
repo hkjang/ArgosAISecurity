@@ -19,7 +19,7 @@ const OBJECTS: &str = "objects";
 const MAX_ITEMS: u64 = 10_000;
 const MAX_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const STATUS_ITEMS: usize = 100;
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 /// 완료 수신증명과 아직 완료되지 않은 예약의 합계. 자동 삭제하지 않는다.
 pub const MAX_ARCHIVE_ITEMS: u64 = 100_000;
 const LEASE_GRACE_MS: u64 = 30_000;
@@ -68,6 +68,8 @@ pub struct QueueTarget {
     pub key_id: String,
     pub pinned_pubkey: String,
     pub allow_http_loopback: bool,
+    #[serde(default)]
+    pub tls_ca_sha256: Option<String>,
 }
 impl QueueTarget {
     fn from_config(config: &VaultConfig) -> Result<Self> {
@@ -81,6 +83,7 @@ impl QueueTarget {
             key_id: config.key_id.clone(),
             pinned_pubkey: hex::encode(crate::public_key(&config.pinned_pubkey)?.to_bytes()),
             allow_http_loopback: config.allow_http_loopback,
+            tls_ca_sha256: client::tls_ca_sha256(config)?,
         })
     }
 }
@@ -116,6 +119,7 @@ pub struct QueueStatus {
     /// 최근 최대 100개. 전체 상태 집계는 전체 큐를 사용한다.
     pub items: Vec<QueueItem>,
     pub items_truncated: bool,
+    pub bundle_jobs: BundleJobsStatus,
 }
 #[derive(Debug, Serialize)]
 pub struct DrainOutcome {
@@ -131,6 +135,11 @@ pub struct DrainReport {
     pub failed: usize,
     pub remaining_pending: u64,
     pub items: Vec<DrainOutcome>,
+    pub attempted_jobs: usize,
+    pub completed_jobs: usize,
+    pub failed_jobs: usize,
+    pub remaining_jobs: u64,
+    pub jobs: Vec<BundleJobOutcome>,
 }
 
 fn private_file(path: &Path) -> Result<()> {
@@ -289,6 +298,7 @@ CREATE UNIQUE INDEX archive_object ON receipt_archive(kind,sha256);")?;
                 limits.max_bytes
             ],
         )?;
+        jobs::create_schema(&tx)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
     }
@@ -302,7 +312,7 @@ CREATE UNIQUE INDEX archive_object ON receipt_archive(kind,sha256);")?;
 
 fn validate_database(conn: &Connection) -> Result<()> {
     let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if !matches!(version, 1 | SCHEMA_VERSION) {
+    if !matches!(version, 1 | 2 | SCHEMA_VERSION) {
         return Err(
             "큐 DB 형식이 없거나 지원하지 않습니다. 남은 파일을 보존하고 점검하세요".into(),
         );
@@ -334,7 +344,7 @@ fn validate_database(conn: &Connection) -> Result<()> {
     if active > MAX_ITEMS {
         return Err("활성 큐 절대 상한 초과".into());
     }
-    if version == SCHEMA_VERSION {
+    if version >= 2 {
         conn.prepare("SELECT lease_token,lease_expires_ms FROM queue_items LIMIT 0")?;
         conn.prepare(&format!(
             "SELECT {ITEM_COLUMNS} FROM receipt_archive LIMIT 0"
@@ -350,6 +360,9 @@ fn validate_database(conn: &Connection) -> Result<()> {
         if bad != 0 || duplicates != 0 || bad_archive != 0 {
             return Err("활성 큐/수신증명 보관 스키마 상태 오류".into());
         }
+    }
+    if version >= 3 {
+        jobs::validate_schema(conn)?;
     }
     Ok(())
 }
@@ -377,22 +390,24 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     if version == SCHEMA_VERSION {
         return Ok(());
     }
-    let (target, _) = metadata(conn)?.ok_or("큐 대상 없음")?;
-    // DDL이나 파일 정리 전에 모든 이전 완료 수신증명을 검증한다.
-    {
+    if version == 1 {
+        let (target, _) = metadata(conn)?.ok_or("큐 대상 없음")?;
         let mut stmt = conn.prepare(&format!(
             "SELECT {ITEM_COLUMNS} FROM queue_items WHERE state='sent'"
         ))?;
         for row in stmt.query_map([], decode)? {
             verified_item(&row?, &target)?;
         }
-        let bad: u64 = conn.query_row("SELECT COUNT(*) FROM queue_items WHERE state NOT IN ('pending','sent') OR (state='pending' AND (receipt_json IS NOT NULL OR sent_at_ms IS NOT NULL))", [], |r| r.get(0))?;
+        let bad:u64=conn.query_row("SELECT COUNT(*) FROM queue_items WHERE state NOT IN ('pending','sent') OR (state='pending' AND (receipt_json IS NOT NULL OR sent_at_ms IS NOT NULL))",[],|r|r.get(0))?;
         if bad != 0 {
             return Err("기존 큐 상태가 유효하지 않아 마이그레이션을 거부합니다".into());
         }
     }
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    tx.execute_batch("ALTER TABLE queue_items ADD COLUMN lease_token TEXT; ALTER TABLE queue_items ADD COLUMN lease_expires_ms INTEGER; CREATE TABLE receipt_archive AS SELECT * FROM queue_items WHERE state='sent'; CREATE UNIQUE INDEX archive_id ON receipt_archive(id); CREATE UNIQUE INDEX archive_object ON receipt_archive(kind,sha256); DELETE FROM queue_items WHERE state='sent';")?;
+    if version == 1 {
+        tx.execute_batch("ALTER TABLE queue_items ADD COLUMN lease_token TEXT; ALTER TABLE queue_items ADD COLUMN lease_expires_ms INTEGER; CREATE TABLE receipt_archive AS SELECT * FROM queue_items WHERE state='sent'; CREATE UNIQUE INDEX archive_id ON receipt_archive(id); CREATE UNIQUE INDEX archive_object ON receipt_archive(kind,sha256); DELETE FROM queue_items WHERE state='sent';")?;
+    }
+    jobs::create_schema(&tx)?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
     Ok(())
@@ -550,7 +565,18 @@ pub fn enqueue(
         )
         .optional()?
     {
-        if item.state == "sent" { verified_item(&item, &target)?; }
+        if item.state == "sent" {
+            verified_item(&item, &target)?;
+        } else {
+            // 재등록 성공도 원본을 제거해도 되는 상태여야 한다. 기존 본문을 자동 수리하지 않는다.
+            let path = snapshot(directory, &item.id)?;
+            private_file(&path)?;
+            let stored = read_bounded(&path, config.max_object_bytes)?;
+            private_file(&path)?;
+            if stored.len() as u64 != item.size_bytes || sha256(&stored) != item.sha256 {
+                return Err("기존 pending 스냅샷 내용 불일치: 원본을 보존하고 큐를 점검하세요".into());
+            }
+        }
         tx.commit()?;
         return Ok(item);
     }
@@ -649,6 +675,7 @@ pub fn status(directory: &Path) -> Result<QueueStatus> {
         }
         items
     };
+    let bundle_jobs = jobs::status_with_conn(&tx)?;
     tx.commit()?;
     Ok(QueueStatus {
         target: meta.as_ref().map(|m| m.0.clone()),
@@ -665,6 +692,7 @@ pub fn status(directory: &Path) -> Result<QueueStatus> {
         archive_slots_available: MAX_ARCHIVE_ITEMS.saturating_sub(items_total),
         items_truncated: items_total > items.len() as u64,
         items,
+        bundle_jobs,
     })
 }
 /// 임의 활성 항목 또는 오래된 완료 수신증명을 읽고 완료 서명을 검증한다.
@@ -690,6 +718,11 @@ pub fn item(directory: &Path, id: &str) -> Result<QueueItem> {
     Ok(item)
 }
 
+mod jobs;
+pub use jobs::{
+    bundle_job, bundle_jobs, enqueue_bundle, BundleChunkRef, BundleJob, BundleJobOutcome,
+    BundleJobSummary, BundleJobsStatus,
+};
 mod archive;
 pub use archive::{export_archive, verify_archive, ArchiveExportReport, ArchiveVerification};
 
@@ -803,8 +836,24 @@ pub fn drain_once(
         failed: 0,
         remaining_pending: 0,
         items: vec![],
+        attempted_jobs: 0,
+        completed_jobs: 0,
+        failed_jobs: 0,
+        remaining_jobs: 0,
+        jobs: vec![],
     };
     for _ in 0..options.max_items {
+        if let Some(outcome) = jobs::drain_one(directory, config, &target)? {
+            report.attempted_jobs += 1;
+            if outcome.completed {
+                report.completed_jobs += 1;
+            }
+            if outcome.error.is_some() {
+                report.failed_jobs += 1;
+            }
+            report.jobs.push(outcome);
+            continue;
+        }
         let Some(lease) = claim(directory, &target, config.timeout_secs, crate::now_ms())? else {
             break;
         };
@@ -846,7 +895,9 @@ pub fn drain_once(
             receipt: if sent { result.ok() } else { None },
         });
     }
-    report.remaining_pending = status(directory)?.pending_items;
+    let current = status(directory)?;
+    report.remaining_pending = current.pending_items;
+    report.remaining_jobs = current.bundle_jobs.pending;
     Ok(report)
 }
 

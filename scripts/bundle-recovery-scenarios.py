@@ -175,9 +175,9 @@ class Scenarios(VAULT.Scenarios):
         queued = self.parsed("enqueue", "--stage", stage, "--directory", queue,
                              "--max-items", 1000, "--max-bytes", 256 * MIB)
         unique = {item["sha256"] for item in manifest["chunks"]}
-        require(queued["registered_unique_chunks"] == len(unique) >= 2, "청크 등록 중복 판정/개수 오류")
-        require({item["sha256"] for item in queued["items"]} == unique, "큐와 구성 목록의 청크 해시 차이")
-        require(queued["published"] is False, "등록만으로 완료 표시됨")
+        require(len(queued["chunk_items"]) == len(unique) >= 2, "청크 등록 중복 판정/개수 오류")
+        require({item["sha256"] for item in queued["chunk_items"]} == unique, "큐와 구성 목록의 청크 해시 차이")
+        require(queued["state"] == "pending" and not queued["recommended"], "등록만으로 완료/추천 표시됨")
         self.record("64MiB 초과 native backup 분할·큐 등록",
                     "67MiB zeroblob을 포함한 DB를 16MiB 청크로 분할하고 고유 청크만 영속 등록",
                     {"backup_bytes": self.backup_bytes, "sha256": self.expected_hash,

@@ -126,6 +126,18 @@ impl EnqueueOptions {
 }
 #[derive(Subcommand)]
 enum QueueAction {
+    /// 영속 번들 작업의 단계·완료·재시도 조회 (전송·변경 없음)
+    Jobs {
+        #[arg(long)]
+        directory: PathBuf,
+    },
+    /// 번들 ID의 고정 구성 목록과 게시 작업 상태 조회
+    ShowBundle {
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        id: String,
+    },
     /// 완료 수신증명을 새 파일에 검증 가능한 JSONL로 내보내기 (원본 이력 유지)
     ExportArchive {
         #[arg(long)]
@@ -176,7 +188,7 @@ enum QueueAction {
         #[arg(long)]
         id: String,
     },
-    /// 재시도 시각이 된 항목을 제한된 개수만 전송하고 종료
+    /// 제한된 시도 예산으로 청크 전송과 준비된 번들 게시를 이어 수행
     Drain {
         #[arg(long)]
         directory: PathBuf,
@@ -186,6 +198,20 @@ enum QueueAction {
 }
 
 fn run_queue(action: QueueAction, config_path: Option<PathBuf>, agent_config: &Path) -> Result<()> {
+    if let QueueAction::Jobs { directory } = &action {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&convert(queue::bundle_jobs(directory))?)?
+        );
+        return Ok(());
+    }
+    if let QueueAction::ShowBundle { directory, id } = &action {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&convert(queue::bundle_job(directory, id))?)?
+        );
+        return Ok(());
+    }
     if let QueueAction::ExportArchive { directory, out } = &action {
         println!(
             "{}",
@@ -291,13 +317,16 @@ fn run_queue(action: QueueAction, config_path: Option<PathBuf>, agent_config: &P
                 &queue::DrainOptions { max_items },
             ))?;
             println!("{}", serde_json::to_string_pretty(&report)?);
-            if report.failed > 0 {
+            if report.failed > 0 || report.failed_jobs > 0 {
                 return Err(
-                    "일부 전송이 실패했습니다. 대기열의 재시도 시각과 상태를 확인하세요".into(),
+                    "일부 전송·번들 게시가 실패했습니다. 대기열의 재시도 시각과 상태를 확인하세요"
+                        .into(),
                 );
             }
         }
         QueueAction::Status { .. }
+        | QueueAction::Jobs { .. }
+        | QueueAction::ShowBundle { .. }
         | QueueAction::Show { .. }
         | QueueAction::ExportArchive { .. }
         | QueueAction::VerifyArchive { .. } => unreachable!(),

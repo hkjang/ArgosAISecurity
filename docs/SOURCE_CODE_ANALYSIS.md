@@ -173,7 +173,7 @@ CLI의 `Command`·`PolicyAction`·`RetentionAction`은 명령 정의의 기준�
 
 ## v0.5.0 큐 운영 경로
 
-`argos-vault/src/queue.rs`와 하위 모듈은 schema v2 이전·완료 이력·임대·내보내기를 담당한다. `client.rs`는 HTTP/연결/무결성 오류를 민감 본문 없이 분류한다. `packaging/argos-vault-upload.{service,timer}`는 별도 계정의 제한된 drain 호출을 예약한다. 실제 동시 등록·이력 검증은 `scripts/queue-operations-scenarios.py`를 참고한다.
+`argos-vault/src/queue.rs`와 하위 모듈은 schema v3 이전·완료 이력·임대·내보내기 및 번들 게시 작업을 담당한다. `client.rs`는 HTTP/연결/무결성 오류를 민감 본문 없이 분류한다. `packaging/argos-vault-upload.{service,timer}`는 별도 계정의 제한된 drain 호출을 예약한다. 실제 동시 등록·이력 검증은 `scripts/queue-operations-scenarios.py`를 참고한다.
 
 
 ## v0.6.0 원격 복구 묶음 경로
@@ -188,3 +188,7 @@ CLI의 `Command`·`PolicyAction`·`RetentionAction`은 명령 정의의 기준�
 `test`는 서명된 원격 record를 확인하고 backup_path만 새 파일로 바꾼다. `verify_report`가 계획·필수 검사·백업 전체 해시를 대조한 뒤 remote get으로 현재 good/동일 manifest·completion을 다시 확인한다. report_authenticated와 trial_executor_authenticated는 false다. 사건 3파일 자동 묶음·로컬 취소 자동 전파·당시 정책 해시 고정·AI 주장 의미 검사·내장 빌드 커밋은 별도 후속 작업이다.
 
 `scripts/bundle-recovery-scenarios.py`는 실제 CLI와 합성 SQLite 백업으로 부분 전송·원본 자료 제거·원격 복구 시험·판정 취소·실패 결과를 확인한다. 측정 환경과 결과는 [검증 기록](PLATFORM_VALIDATION.md)을 따른다.
+
+## v0.7.0 추가 코드
+
+argos-vault/queue/jobs.rs는 번들 manifest와 작업 상태를 청크 참조에 결합한다. client.rs는 사설 TLS CA 목록을 지원하며 그 해시를 큐 대상에 고정한다. vault_bundle.rs의 preapproval 경로와 service_recovery/sqlite_sandbox.rs는 승인 전 시험을 분리한다. bundle/server.rs 및 quota.rs는 개별 장애와 취소 예산을 다룬다. [운영 흐름](FEATURE_BUNDLE_OPERATIONS.md)과 [검증 기록](PLATFORM_VALIDATION.md)을 함께 확인한다.

@@ -5,7 +5,6 @@ use argos_vault::{bundle, queue, VaultConfig};
 use clap::{Subcommand, ValueEnum};
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeSet,
     fs::{self, OpenOptions},
     io::Read,
     path::{Component, Path, PathBuf},
@@ -41,7 +40,7 @@ pub(super) enum Action {
         #[arg(long)]
         review_history: Option<PathBuf>,
     },
-    /// 준비된 청크를 영속 큐에 등록 (통신 없음, 여러 등록은 원자적이지 않음)
+    /// 청크·구성 목록·완료 요청을 영속 작업으로 원자적 등록 (통신 없음)
     Enqueue {
         #[arg(long)]
         stage: PathBuf,
@@ -115,6 +114,9 @@ pub(super) enum Action {
         /// 전용 0700 부모 아래 존재하지 않는 절대 경로
         #[arg(long)]
         out: PathBuf,
+        /// 미확인 완성 묶음을 실제 격리 환경에서 승인 전 시험 (정상본 승인 아님)
+        #[arg(long)]
+        preapproval: bool,
     },
 }
 
@@ -227,7 +229,12 @@ pub(super) fn run(action: Action, config_path: Option<PathBuf>) -> Result<()> {
             };
             serde_json::to_value(convert(bundle::review(&config, &agent_id, &id, &request))?)?
         }
-        Action::Test { agent_id, id, out } => return test_bundle(&config, &agent_id, &id, &out),
+        Action::Test {
+            agent_id,
+            id,
+            out,
+            preapproval,
+        } => return test_bundle(&config, &agent_id, &id, &out, preapproval),
         Action::Prepare { .. } => unreachable!(),
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
@@ -240,40 +247,10 @@ fn enqueue_stage(
     directory: &Path,
     limits: queue::QueueLimits,
 ) -> Result<Value> {
-    private_directory(stage)?;
-    private_directory(&stage.join("chunks"))?;
-    if directory.starts_with(stage) {
-        return Err("전송 큐는 준비 디렉터리 밖에 두세요".into());
-    }
-    let manifest = convert(bundle::read_manifest(&stage.join("manifest.json")))?;
-    let mut seen = BTreeSet::new();
-    let mut items = Vec::new();
-    for chunk in &manifest.chunks {
-        if !seen.insert(chunk.sha256.clone()) {
-            continue;
-        }
-        let bytes = read_small(
-            &stage.join("chunks").join(format!("{}.bin", chunk.sha256)),
-            bundle::CHUNK_BYTES,
-        )?;
-        if bytes.len() as u64 != chunk.size_bytes || argos_vault::sha256(&bytes) != chunk.sha256 {
-            return Err("준비된 청크의 해시·크기가 구성 목록과 다릅니다".into());
-        }
-        // 검증 뒤 원래 stage를 다시 읽지 않도록 같은 바이트를 전용 임시 파일에 고정한다.
-        let temporary = super::PrivateDirectory::new()?;
-        let path = temporary.0.join("chunk.bin");
-        write_new(&path, &bytes)?;
-        let item = convert(queue::enqueue(directory, config, &path, "backup", &limits))?;
-        if item.sha256 != chunk.sha256 || item.size_bytes != chunk.size_bytes {
-            return Err("큐 등록 결과가 검증한 청크와 다릅니다".into());
-        }
-        items.push(item);
-    }
-    Ok(
-        json!({"bundle_id":manifest.bundle_id,"manifest":stage.join("manifest.json"),
-        "registered_unique_chunks":items.len(),"chunk_count":manifest.chunks.len(),
-        "items":items,"published":false,"recommended":false}),
-    )
+    serde_json::to_value(convert(queue::enqueue_bundle(
+        directory, config, stage, &limits,
+    ))?)
+    .map_err(Into::into)
 }
 
 fn parse_plan(text: &str) -> Result<ServiceRecoveryPlan> {
@@ -307,21 +284,50 @@ fn relocated_plan(
     Ok(plan)
 }
 
-fn eligible(record: &bundle::BundleRecord) -> std::result::Result<(), &'static str> {
-    if record.completion.is_none() {
+fn eligible(
+    record: &bundle::BundleRecord,
+    preapproval: bool,
+) -> std::result::Result<(), &'static str> {
+    eligible_review(
+        record.completion.is_some(),
+        &record.current_review,
+        record.recommended,
+        preapproval,
+    )
+}
+
+fn eligible_review(
+    complete: bool,
+    current_review: &str,
+    recommended: bool,
+    preapproval: bool,
+) -> std::result::Result<(), &'static str> {
+    if !complete {
         return Err("bundle_incomplete");
     }
-    if record.current_review != "good" || !record.recommended {
+    if preapproval {
+        if current_review != "unknown" || recommended {
+            return Err("preapproval_requires_unknown_review");
+        }
+    } else if current_review != "good" || !recommended {
         return Err("remote_review_not_good");
     }
     Ok(())
 }
 
-fn test_bundle(config: &VaultConfig, agent: &str, id: &str, out: &Path) -> Result<()> {
+fn test_bundle(
+    config: &VaultConfig,
+    agent: &str,
+    id: &str,
+    out: &Path,
+    preapproval: bool,
+) -> Result<()> {
     new_private_directory(out)?;
     let mut summary = json!({
         "format":"argos-bundle-recovery-test-v1","agent_id":agent,"bundle_id":id,
         "started_at_ms":now_ms(),"status":"rejected","recommended":false,
+        "preapproval":preapproval,"trial_passed":false,"operational_restore_authorized":false,
+        "isolation_required":preapproval,
         "failure_code":Value::Null,"report_authenticated":false,
         "trial_executor_authenticated":false,"remote_review_authenticated":false,
         "remote_record_authenticated":false,
@@ -339,15 +345,15 @@ fn test_bundle(config: &VaultConfig, agent: &str, id: &str, out: &Path) -> Resul
         summary["remote_review_authenticated"] =
             json!(before.completion.is_some() && !before.reviews.is_empty());
         summary["initial_review"] = json!(before.current_review);
-        eligible(&before)?;
+        eligible(&before, preapproval)?;
         let plan = relocated_plan(
             before.manifest.metadata.recovery_plan.as_deref(),
             before.manifest.size_bytes,
             &out.join("backup.bin"),
         )?;
-        let fetched = bundle::fetch(config, agent, id, &plan.backup_path, false)
+        let fetched = bundle::fetch(config, agent, id, &plan.backup_path, preapproval)
             .map_err(|_| "backup_fetch_or_review_failed")?;
-        eligible(&fetched)?;
+        eligible(&fetched, preapproval)?;
         if fetched.manifest != before.manifest || fetched.completion != before.completion {
             return Err("bundle_changed_during_fetch");
         }
@@ -365,33 +371,41 @@ fn test_bundle(config: &VaultConfig, agent: &str, id: &str, out: &Path) -> Resul
         )
         .map_err(|_| "manifest_write_failed")?;
         let drill = out.join("drill");
-        let report = crate::service_recovery::supervise_report(&plan_path, &drill)
-            .map_err(|_| "drill_supervision_failed")?;
-        let passed = report.status == "passed";
-        summary["drill_report"] =
-            serde_json::to_value(&report).map_err(|_| "report_serialization_failed")?;
-        if !passed {
-            return Err("service_recovery_failed");
-        }
-        let verified = service::verify_report(
-            &plan,
-            &drill.join(service::REPORT_NAME),
-            plan.timeout_secs + 60,
-        )
-        .map_err(|_| "report_consistency_failed")?;
-        if verified.backup_sha256 != before.manifest.sha256
-            || verified.backup_bytes != before.manifest.size_bytes
-        {
-            return Err("report_bundle_backup_mismatch");
-        }
-        summary["verification"] =
-            serde_json::to_value(&verified).map_err(|_| "verification_serialization_failed")?;
+        let trial_result = (|| -> std::result::Result<(), &'static str> {
+            let report = if preapproval {
+                crate::service_recovery::supervise_preapproval_report(&plan_path, &drill)
+                    .map_err(|_| "preapproval_isolation_or_supervision_failed")?
+            } else {
+                crate::service_recovery::supervise_report(&plan_path, &drill)
+                    .map_err(|_| "drill_supervision_failed")?
+            };
+            let passed = report.status == "passed";
+            summary["drill_report"] =
+                serde_json::to_value(&report).map_err(|_| "report_serialization_failed")?;
+            if !passed {
+                return Err("service_recovery_failed");
+            }
+            let verified = service::verify_report(
+                &plan,
+                &drill.join(service::REPORT_NAME),
+                plan.timeout_secs + 60,
+            )
+            .map_err(|_| "report_consistency_failed")?;
+            if verified.backup_sha256 != before.manifest.sha256
+                || verified.backup_bytes != before.manifest.size_bytes
+            {
+                return Err("report_bundle_backup_mismatch");
+            }
+            summary["verification"] =
+                serde_json::to_value(&verified).map_err(|_| "verification_serialization_failed")?;
+            Ok(())
+        })();
         // 시험과 보고서 재검증이 끝난 뒤 취소 여부를 다시 조회한다.
         let latest = bundle::get(config, agent, id)
             .map_err(|_| "final_remote_record_unavailable_or_invalid")?;
         summary["final_review"] = json!(latest.current_review);
         summary["review_sequence"] = json!(latest.reviews.len());
-        eligible(&latest)?;
+        eligible(&latest, preapproval)?;
         if latest.manifest != before.manifest || latest.completion != before.completion {
             return Err("bundle_changed_during_drill");
         }
@@ -404,13 +418,15 @@ fn test_bundle(config: &VaultConfig, agent: &str, id: &str, out: &Path) -> Resul
         summary["manifest_sha256"] = json!(latest.manifest_receipt.receipt.sha256);
         summary["backup_sha256"] = json!(latest.manifest.sha256);
         summary["backup_bytes"] = json!(latest.manifest.size_bytes);
-        Ok(())
+        trial_result
     })();
     summary["finished_at_ms"] = json!(now_ms());
     match result {
         Ok(()) => {
             summary["status"] = json!("passed");
-            summary["recommended"] = json!(true);
+            summary["trial_passed"] = json!(true);
+            summary["recommended"] = json!(!preapproval);
+            summary["operational_restore_authorized"] = json!(!preapproval);
         }
         Err(code) => {
             summary["failure_code"] = json!(code);
@@ -560,6 +576,27 @@ mod tests {
     }
 
     #[test]
+    fn preapproval_requires_complete_unknown_and_never_allows_revoked() {
+        assert!(eligible_review(true, "unknown", false, true).is_ok());
+        assert!(eligible_review(true, "good", true, false).is_ok());
+        for review in ["unknown", "good", "revoked"] {
+            for recommended in [false, true] {
+                for preapproval in [false, true] {
+                    assert!(eligible_review(false, review, recommended, preapproval).is_err());
+                }
+            }
+        }
+        for preapproval in [false, true] {
+            assert!(eligible_review(true, "revoked", false, preapproval).is_err());
+            assert!(eligible_review(true, "revoked", true, preapproval).is_err());
+        }
+        assert!(eligible_review(true, "unknown", false, false).is_err());
+        assert!(eligible_review(true, "unknown", true, true).is_err());
+        assert!(eligible_review(true, "good", true, true).is_err());
+        assert!(eligible_review(true, "good", false, false).is_err());
+    }
+
+    #[test]
     fn embedded_plan_rejects_commands_invalid_expectations_and_large_input() {
         assert!(parse_plan(&format!("command='secret external command'\n{}", plan())).is_err());
         assert!(parse_plan(&plan().replace("min_rows=2", "min_rows=-1")).is_err());
@@ -587,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn offline_enqueue_checks_chunk_bytes_before_creating_queue() {
+    fn offline_enqueue_checks_all_bytes_before_registering_job() {
         let temporary = super::super::PrivateDirectory::new().unwrap();
         let source = temporary.0.join("backup.bin");
         write_new(&source, b"reviewed backup bytes").unwrap();
@@ -617,11 +654,14 @@ mod tests {
         fs::write(&chunk, b"changed bytes").unwrap();
         let directory = temporary.0.join("queue");
         assert!(enqueue_stage(&config, &stage, &directory, queue::QueueLimits::default()).is_err());
-        assert!(!directory.exists());
+        assert_eq!(queue::status(&directory).unwrap().pending_items, 0);
+        assert!(queue::bundle_job(&directory, &manifest.bundle_id).is_err());
         fs::write(&chunk, b"reviewed backup bytes").unwrap();
         let result =
             enqueue_stage(&config, &stage, &directory, queue::QueueLimits::default()).unwrap();
-        assert_eq!(result["registered_unique_chunks"], 1);
+        assert_eq!(result["chunk_items"].as_array().unwrap().len(), 1);
+        assert_eq!(result["state"], "pending");
+        assert_eq!(result["recommended"], false);
         assert_eq!(queue::status(&directory).unwrap().pending_items, 1);
     }
 }
