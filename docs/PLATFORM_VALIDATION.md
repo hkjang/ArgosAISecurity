@@ -38,6 +38,18 @@ python3 scripts/durability-scenarios.py --bin-dir target/release --report /tmp/a
 
 전송 중 전체 큐 잠금은 해제하지만, 등록 시 파일 복사·DB 검사·짧은 트랜잭션 잠금이 필요하다. 저장장치 지연이나 등록 경쟁에서도 무조건 성공하는 실시간 큐는 아니다. 전원 차단·원격 파일시스템·실제 디스크 소진·같은 UID/root의 삭제 방지는 별도 검증 범위다.
 
+## v0.5.0 배포 산출물 확인
+
+태그와 `BUILD_INFO.json`의 소스 커밋은 `9141949ccd33672ba1d3997bfa0f111daeaac330`이다. 게시한 압축 파일을 다시 내려받아 `SHA256SUMS`, 네 실행 파일의 해시·크기·도움말, 소스 커밋·새 예약 유닛·큐 시험 스크립트를 확인했다. 패키지 기준은 GNU/Linux x86_64·glibc 2.39 이상이다.
+
+`argos-v0.5.0-linux-x86_64-gnu.tar.gz`의 SHA-256:
+
+```text
+81f2c765b94bb4f33ef61263a2ebfe20bc53d2d20ac76dc0a9ff65368291e013
+```
+
+한국어·영어 사이트와 JavaScript의 v0.5.0 게시도 확인했다. 배포 후 검증 문서 갱신은 게시한 태그와 첨부 파일을 변경하지 않는다.
+
 ## v0.4.0 보관 지속성·용량·복구 보고서
 
 - `cargo test --workspace --offline --locked`: **220개 통과**, 실패 0개. 별도 PostgreSQL 18.6 네이티브 복원 시험 **1개도 통과**했다.
