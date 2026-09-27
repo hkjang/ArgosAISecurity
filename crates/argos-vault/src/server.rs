@@ -127,6 +127,14 @@ pub fn router(config: ServerConfig) -> Result<Router> {
         permits: Arc::new(tokio::sync::Semaphore::new(4)),
     };
     Ok(Router::new()
+        .route("/v1/bundles", post(bundle_api::register))
+        .route("/v1/bundles/:bundle/complete", post(bundle_api::complete))
+        .route("/v1/bundles/:agent", get(bundle_api::list))
+        .route("/v1/bundles/:agent/:bundle", get(bundle_api::get))
+        .route(
+            "/v1/bundles/:agent/:bundle/reviews",
+            post(bundle_api::review),
+        )
         .route("/v1/objects/:hash", post(upload))
         .route("/v1/objects/:agent/:hash", get(download))
         .route("/v1/receipts/:agent/:hash", get(receipt))
@@ -178,7 +186,7 @@ async fn upload(
         .headers()
         .get("x-argos-kind")
         .and_then(|v| v.to_str().ok())
-        .filter(|v| valid_kind(v))
+        .filter(|v| matches!(*v, "evidence" | "backup" | "audit"))
         .map(str::to_owned)
     else {
         return failure(StatusCode::BAD_REQUEST, "유효한 X-Argos-Kind가 필요합니다");
@@ -319,6 +327,9 @@ impl Storage {
         )
     }
     fn put(&mut self, agent: &str, hash: &str, kind: &str, bytes: &[u8]) -> Result<SignedReceipt> {
+        if bytes.len() > self.config.max_object_bytes {
+            return Err("객체 크기가 서버 상한을 초과합니다".into());
+        }
         let (object_path, receipt_path) = self.paths(agent, hash);
         // 이미 검증된 객체의 재전송은 사용량/여유공간이 가득 차도 유지한다.
         if receipt_path.exists() {
@@ -371,6 +382,9 @@ impl Storage {
         match result {
             Ok(receipt) => {
                 self.capacity.mark_receipted(agent);
+                if kind.starts_with("bundle-") {
+                    self.capacity.bundle_control_objects += 1;
+                }
                 Ok(receipt)
             }
             Err(error) => {
@@ -417,3 +431,6 @@ fn read_storage_file(path: &Path, maximum: usize) -> Result<Vec<u8>> {
 #[cfg(all(test, target_os = "linux"))]
 #[path = "quota_tests.rs"]
 mod quota_tests;
+
+#[path = "bundle/server.rs"]
+mod bundle_api;

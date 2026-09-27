@@ -11,6 +11,9 @@ use std::{
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[path = "vault_bundle.rs"]
+mod bundle_cli;
+
 #[derive(Args)]
 pub struct Arguments {
     /// 고정 공개키·서버 주소·역할별 토큰을 담은 별도 보관 설정
@@ -38,6 +41,11 @@ impl Kind {
 
 #[derive(Subcommand)]
 enum Action {
+    /// 분할 백업 보관·원격 정상 판정·원본 호스트 없는 복구 시험
+    Bundle {
+        #[command(subcommand)]
+        action: bundle_cli::Action,
+    },
     /// 관리자 인증으로 보관 용량·디스크 여유·신규 업로드 차단 이유 조회
     Usage,
     /// 전송할 바이트를 로컬에 보존하고 중단 후 이어 보내기
@@ -359,6 +367,7 @@ fn load_config(path: Option<PathBuf>) -> Result<VaultConfig> {
 
 pub fn run(args: Arguments, agent_config: &Path) -> Result<()> {
     match args.action {
+        Action::Bundle { action } => return bundle_cli::run(action, args.vault_config),
         Action::Queue { action } => return run_queue(action, args.vault_config, agent_config),
         Action::Usage => {
             let config = load_config(args.vault_config)?;

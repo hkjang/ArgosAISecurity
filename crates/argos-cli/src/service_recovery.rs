@@ -160,6 +160,23 @@ fn capture(
 }
 
 fn supervise(plan_path: &Path, out: &Path) -> CmdResult {
+    let report = supervise_report(plan_path, out)?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    if report.status != "passed" {
+        return Err(format!(
+            "서비스 복구 검증 실패: {}",
+            report.failure_code.as_deref().unwrap_or("unknown")
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// 동일한 격리·제한·감독 경계를 사용하되 호출자가 보고서 출력을 결정한다.
+pub(crate) fn supervise_report(
+    plan_path: &Path,
+    out: &Path,
+) -> Result<ServiceRecoveryReport, Box<dyn std::error::Error>> {
     let plan = read_plan(plan_path)?;
     if !out.is_absolute()
         || out.file_name().is_none()
@@ -300,15 +317,7 @@ fn supervise(plan_path: &Path, out: &Path) -> CmdResult {
     } else {
         serde_json::from_slice::<ServiceRecoveryReport>(&output).map_err(|_|"서비스 복구 작업 프로세스가 완료 보고서를 반환하지 못했습니다. 작업 경로 권한과 입력 파일을 확인하세요")?
     };
-    println!("{}", serde_json::to_string_pretty(&report)?);
-    if report.status != "passed" {
-        return Err(format!(
-            "서비스 복구 검증 실패: {}",
-            report.failure_code.as_deref().unwrap_or("unknown")
-        )
-        .into());
-    }
-    Ok(())
+    Ok(report)
 }
 
 /// Internal command: only bounded, validated JSON is read from stdin. Direct use

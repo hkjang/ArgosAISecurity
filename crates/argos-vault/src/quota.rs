@@ -175,6 +175,7 @@ pub(crate) struct CapacityState {
     reasons: Vec<String>,
     admission_rejections: u64,
     _writer: WriterLock,
+    pub(crate) bundle_control_objects: u64,
 }
 impl CapacityState {
     pub(crate) fn open(
@@ -201,6 +202,7 @@ impl CapacityState {
             reasons: Vec::new(),
             admission_rejections: 0,
             _writer: writer,
+            bundle_control_objects: 0,
         };
         for agent in configured_agents {
             if state.agents.len() >= state.limits.max_tracked_agents {
@@ -311,6 +313,9 @@ impl CapacityState {
                         || receipt.receipt.size_bytes != metadata.len()
                     {
                         return Err("증명과 객체 메타데이터 불일치".into());
+                    }
+                    if receipt.receipt.kind.starts_with("bundle-") {
+                        self.bundle_control_objects += 1;
                     }
                     Ok(())
                 })();

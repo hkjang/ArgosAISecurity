@@ -1,5 +1,6 @@
 //! 별도 호스트의 추가 전용 보관 API와 고정 공개키로 검증하는 수신증명.
 //! 디스크 관리자/root가 보관 데이터를 바꾸지 못하게 하는 WORM 구현은 아니다.
+pub mod bundle;
 mod client;
 pub mod queue;
 mod quota;
@@ -65,7 +66,10 @@ fn valid_hash(value: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 fn valid_kind(value: &str) -> bool {
-    matches!(value, "evidence" | "backup" | "audit")
+    matches!(
+        value,
+        "evidence" | "backup" | "audit" | "bundle-manifest" | "bundle-completion" | "bundle-review"
+    )
 }
 fn public_key(hex_key: &str) -> Result<VerifyingKey> {
     let bytes: [u8; 32] = hex::decode(hex_key)?

@@ -172,7 +172,10 @@ pub(crate) fn token(value: &str) -> Result<&str> {
     }
     Ok(value)
 }
-fn read_response(response: reqwest::blocking::Response, maximum: usize) -> Result<Vec<u8>> {
+pub(crate) fn read_response(
+    response: reqwest::blocking::Response,
+    maximum: usize,
+) -> Result<Vec<u8>> {
     if !response.status().is_success() {
         // 원격 오류 본문이나 요청 자격 증명은 오류 문자열로 확산하지 않는다.
         let status = response.status().as_u16();
