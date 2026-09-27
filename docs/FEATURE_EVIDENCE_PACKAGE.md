@@ -30,3 +30,5 @@ argos evidence-verify /secure/export/incident-42
 ## v0.3.0 추가 확인
 
 패키지를 별도 서버에 보관하고 고정 공개키로 수신증명을 확인하려면 [원격 보관](FEATURE_REMOTE_VAULT.md)의 `vault upload-evidence`를 사용한다. 이는 발급자 또는 사건 당시 정책의 진실성을 인증하는 서명은 아니다.
+
+v0.4.0의 [영속 대기열](FEATURE_VAULT_QUEUE.md)에서 검증한 패키지 바이트를 보존해 재전송할 수 있다. 세 파일은 각각 등록·전송되므로 모든 항목의 완료와 manifest 검증을 확인한다. 대기열 경로는 패키지 자신이나 내부 경로로 지정할 수 없다.

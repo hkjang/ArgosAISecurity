@@ -1,5 +1,5 @@
 use argos_common::AgentConfig;
-use argos_vault::{SignedReceipt, VaultConfig};
+use argos_vault::{queue, SignedReceipt, VaultConfig};
 use clap::{Args, Subcommand, ValueEnum};
 use rand_core::{OsRng, RngCore};
 use serde_json::json;
@@ -38,6 +38,13 @@ impl Kind {
 
 #[derive(Subcommand)]
 enum Action {
+    /// 관리자 인증으로 보관 용량·디스크 여유·신규 업로드 차단 이유 조회
+    Usage,
+    /// 전송할 바이트를 로컬에 보존하고 중단 후 이어 보내기
+    Queue {
+        #[command(subcommand)]
+        action: QueueAction,
+    },
     /// 새 Ed25519 보관 서버 서명키 생성 (부모 전용 디렉터리 0700 필요)
     Keygen {
         #[arg(long)]
@@ -89,6 +96,202 @@ enum Action {
     },
 }
 
+#[derive(Args)]
+struct EnqueueOptions {
+    /// 현재 계정 소유 전용 0700 큐 절대 경로 (처음 등록 시 생성)
+    #[arg(long)]
+    directory: PathBuf,
+    /// 완료 이력도 포함한 최대 항목 수
+    #[arg(long, default_value_t = 1000)]
+    max_items: u64,
+    /// 미전송 파일 스냅샷의 총 바이트 상한
+    #[arg(long, default_value_t = 268_435_456)]
+    max_bytes: u64,
+}
+impl EnqueueOptions {
+    fn limits(&self) -> queue::QueueLimits {
+        queue::QueueLimits {
+            max_items: self.max_items,
+            max_bytes: self.max_bytes,
+        }
+    }
+}
+#[derive(Subcommand)]
+enum QueueAction {
+    /// 파일을 같은 바이트의 로컬 스냅샷으로 대기열에 등록 (전송하지 않음)
+    Enqueue {
+        #[command(flatten)]
+        options: EnqueueOptions,
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long, value_enum)]
+        kind: Kind,
+    },
+    /// 검토된 백업 버전을 해시 검증 후 대기열에 등록
+    EnqueueBackup {
+        #[command(flatten)]
+        options: EnqueueOptions,
+        path: PathBuf,
+        #[arg(long)]
+        version: i64,
+    },
+    /// 검증된 증거 패키지의 세 파일 등록 (여러 등록은 단일 트랜잭션이 아님)
+    EnqueueEvidence {
+        #[command(flatten)]
+        options: EnqueueOptions,
+        #[arg(long)]
+        package: PathBuf,
+    },
+    /// 대기·재시도·완료 수신증명 조회 (전송·큐 변경 없음)
+    Status {
+        #[arg(long)]
+        directory: PathBuf,
+    },
+    /// 항목 ID로 완료 수신증명과 재시도 상태 조회
+    Show {
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        id: String,
+    },
+    /// 재시도 시각이 된 항목을 제한된 개수만 전송하고 종료
+    Drain {
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long, default_value_t = 16)]
+        max_items: usize,
+    },
+}
+
+fn run_queue(action: QueueAction, config_path: Option<PathBuf>, agent_config: &Path) -> Result<()> {
+    if let QueueAction::Show { directory, id } = &action {
+        let item = convert(queue::item(directory, id))?;
+        println!("{}", serde_json::to_string_pretty(&item)?);
+        return Ok(());
+    }
+    if let QueueAction::Status { directory } = action {
+        let status = convert(queue::status(&directory))?;
+        println!("{}", serde_json::to_string_pretty(&status)?);
+        return Ok(());
+    }
+    let config = load_config(config_path)?;
+    match action {
+        QueueAction::Enqueue {
+            options,
+            file,
+            kind,
+        } => {
+            let item = convert(queue::enqueue(
+                &options.directory,
+                &config,
+                &file,
+                kind.as_str(),
+                &options.limits(),
+            ))?;
+            println!("{}", serde_json::to_string_pretty(&item)?);
+        }
+        QueueAction::EnqueueBackup {
+            options,
+            path,
+            version,
+        } => {
+            let (temporary, selected) = prepare_backup(agent_config, &path, version)?;
+            let item = convert(queue::enqueue(
+                &options.directory,
+                &config,
+                &temporary.0.join("backup"),
+                "backup",
+                &options.limits(),
+            ))?;
+            if item.sha256 != selected.hash || item.size_bytes != selected.size {
+                return Err("대기열 스냅샷과 선택한 백업의 해시·크기가 다릅니다".into());
+            }
+            println!("{}", serde_json::to_string_pretty(&item)?);
+        }
+        QueueAction::EnqueueEvidence { options, package } => {
+            let package = package.canonicalize()?;
+            let parent = options
+                .directory
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .canonicalize()?;
+            let queue_path = if options.directory.try_exists()? {
+                options.directory.canonicalize()?
+            } else {
+                parent.join(
+                    options
+                        .directory
+                        .file_name()
+                        .ok_or("큐 경로 이름이 없습니다")?,
+                )
+            };
+            if queue_path.starts_with(&package) {
+                return Err("큐 디렉터리는 증거 패키지 밖에 두세요".into());
+            }
+            let snapshot = crate::evidence_package::snapshot(&package)?;
+            let temporary = PrivateDirectory::new()?;
+            for name in ["evidence.json", "policy.json", "manifest.json"] {
+                let path = temporary.0.join(name);
+                write_new(&path, snapshot.get(name).ok_or("증거 파일 누락")?)?;
+                let item = convert(queue::enqueue(
+                    &options.directory,
+                    &config,
+                    &path,
+                    "evidence",
+                    &options.limits(),
+                ))?;
+                // 뒤의 등록이 실패해도 완료된 항목의 ID는 출력한다.
+                println!("{}", json!({"package_file":name,"item":item}));
+            }
+        }
+        QueueAction::Drain {
+            directory,
+            max_items,
+        } => {
+            let report = convert(queue::drain_once(
+                &directory,
+                &config,
+                &queue::DrainOptions { max_items },
+            ))?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if report.failed > 0 {
+                return Err(
+                    "일부 전송이 실패했습니다. 대기열의 재시도 시각과 상태를 확인하세요".into(),
+                );
+            }
+        }
+        QueueAction::Status { .. } | QueueAction::Show { .. } => unreachable!(),
+    }
+    Ok(())
+}
+
+fn prepare_backup(
+    agent_config: &Path,
+    path: &Path,
+    version: i64,
+) -> Result<(PrivateDirectory, argos_recovery::BackupVersion)> {
+    let agent = AgentConfig::load(agent_config)?;
+    if !agent.backup.dir.join("index.db").is_file() {
+        return Err("기존 백업 저장소가 없습니다".into());
+    }
+    let store = argos_recovery::BackupStore::open(&agent.backup.dir, agent.backup.max_file_bytes)?;
+    let selected = store
+        .versions(path)?
+        .into_iter()
+        .find(|v| v.id == version)
+        .ok_or("백업 버전이 없습니다")?;
+    if !selected.known_good {
+        return Err("정상 판정되지 않은 백업은 이 어댑터로 보관할 수 없습니다".into());
+    }
+    let temporary = PrivateDirectory::new()?;
+    let selected = store.preview(path, version, &temporary.0.join("backup"))?;
+    if !selected.known_good {
+        return Err("정상본 판정이 취소되었습니다".into());
+    }
+    Ok((temporary, selected))
+}
+
 fn convert<T>(result: argos_vault::Result<T>) -> Result<T> {
     result.map_err(|error| error as Box<dyn std::error::Error>)
 }
@@ -125,6 +328,12 @@ fn load_config(path: Option<PathBuf>) -> Result<VaultConfig> {
 
 pub fn run(args: Arguments, agent_config: &Path) -> Result<()> {
     match args.action {
+        Action::Queue { action } => return run_queue(action, args.vault_config, agent_config),
+        Action::Usage => {
+            let config = load_config(args.vault_config)?;
+            let usage = convert(argos_vault::fetch_usage(&config))?;
+            println!("{}", serde_json::to_string_pretty(&usage)?);
+        }
         Action::Keygen { out } => {
             let public_key = convert(argos_vault::generate_signing_key_file(&out))?;
             println!("{}", json!({"public_key":public_key,"key_file":out}));
@@ -169,29 +378,8 @@ pub fn run(args: Arguments, agent_config: &Path) -> Result<()> {
         } => {
             ensure_new(&receipt)?;
             let config = load_config(args.vault_config)?;
-            let agent = AgentConfig::load(agent_config)?;
-            // BackupStore::open can initialize a store; require the existing metadata first.
-            if !agent.backup.dir.join("index.db").is_file() {
-                return Err("기존 백업 저장소가 없습니다".into());
-            }
-            let store =
-                argos_recovery::BackupStore::open(&agent.backup.dir, agent.backup.max_file_bytes)?;
-            let temporary = PrivateDirectory::new()?;
+            let (temporary, selected) = prepare_backup(agent_config, &path, version)?;
             let restored = temporary.0.join("backup");
-            let selected = store
-                .versions(&path)?
-                .into_iter()
-                .find(|v| v.id == version)
-                .ok_or("백업 버전이 없습니다")?;
-            if !selected.known_good {
-                return Err(
-                    "정상 판정되지 않은 백업은 upload-backup으로 보관할 수 없습니다".into(),
-                );
-            }
-            let selected = store.preview(&path, version, &restored)?;
-            if !selected.known_good {
-                return Err("정상본 판정이 취소되었습니다".into());
-            }
             let received = convert(argos_vault::upload_file(&config, &restored, "backup"))?;
             if received.receipt.sha256 != selected.hash
                 || received.receipt.size_bytes != selected.size

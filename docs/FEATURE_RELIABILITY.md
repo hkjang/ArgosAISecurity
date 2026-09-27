@@ -69,3 +69,5 @@ argos --config /etc/argos/argos.toml policy status --limit 100
 ## v0.3.0 추가 확인
 
 경로 접근·루트 교체·하위 마운트·검사 상한은 [보호 공백 검사](FEATURE_COVERAGE.md)로 확인한다. 시험 파일의 DB 수신은 `coverage probe`로 별도 검사한다.
+
+v0.4.0의 [원격 파일 전송 큐](FEATURE_VAULT_QUEUE.md)는 중앙 이벤트 outbox와 별개다. 명시적 CLI 등록/전송이며 에이전트의 자동 백업 업로드나 중앙 상태 보고에 아직 연결하지 않는다. 서버의 [용량 상태](FEATURE_VAULT_CAPACITY.md)는 관리자 조회 명령으로 확인한다.

@@ -16,6 +16,8 @@ use std::{
 };
 #[cfg(target_os = "linux")]
 mod postgres;
+mod verification;
+pub use verification::{verify_report, ServiceReportVerification};
 
 const MAX_BACKUP_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_REPORT_BYTES: usize = 256 * 1024;
@@ -98,6 +100,15 @@ pub struct ServiceCheckResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceRecoveryReport {
     pub format: String,
+    /// 구버전 파싱을 위한 선택 필드. 검증은 결합 정보 누락을 거부한다.
+    #[serde(default)]
+    pub plan_hash_version: Option<u32>,
+    #[serde(default)]
+    pub plan_sha256: Option<String>,
+    #[serde(default)]
+    pub expectations_sha256: Option<String>,
+    #[serde(default)]
+    pub required_check_ids: Option<Vec<String>>,
     pub service_id: String,
     pub engine: DatabaseEngine,
     pub started_at_ms: u64,
@@ -255,8 +266,14 @@ pub fn validate_plan(plan: &ServiceRecoveryPlan) -> Result<()> {
 }
 
 pub fn new_report(plan: &ServiceRecoveryPlan) -> ServiceRecoveryReport {
+    let binding = verification::plan_binding(plan).ok();
     ServiceRecoveryReport {
-        format: "argos-service-recovery-v1".into(), service_id: plan.service_id.clone(), engine: plan.engine,
+        format: "argos-service-recovery-v2".into(),
+        plan_hash_version: binding.as_ref().map(|_| verification::PLAN_HASH_VERSION),
+        plan_sha256: binding.as_ref().map(|binding| binding.plan_sha256.clone()),
+        expectations_sha256: binding.as_ref().map(|binding| binding.expectations_sha256.clone()),
+        required_check_ids: binding.map(|binding| binding.required_check_ids),
+        service_id: plan.service_id.clone(), engine: plan.engine,
         started_at_ms: now_ms(), finished_at_ms: 0, status: "failed".into(), failure_code: None,
         backup_sha256: None, backup_bytes: None, restore_duration_ms: 0, validation_duration_ms: 0, total_duration_ms: 0,
         declared_recovery_point_ms: plan.declared_recovery_point_ms,

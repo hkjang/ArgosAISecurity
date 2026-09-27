@@ -31,15 +31,55 @@ pub enum Action {
         #[arg(long)]
         out: PathBuf,
     },
+    /// 현재 계획·백업과 과거 성공 보고서의 일관성·유효 기간 확인 (무서명)
+    Verify {
+        /// 확인할 현재 TOML 복구 시험 계획
+        #[arg(long)]
+        plan: PathBuf,
+        /// 비교할 v2 복구 시험 보고서 JSON
+        #[arg(long)]
+        report: PathBuf,
+        /// 보고서 완료 후 허용할 최대 경과 시간(초, 1 이상)
+        #[arg(long)]
+        max_age_secs: u64,
+    },
 }
 
 pub fn run(action: Action) -> CmdResult {
     match action {
         Action::Test { plan, out } => supervise(&plan, &out),
+        Action::Verify {
+            plan,
+            report,
+            max_age_secs,
+        } => {
+            let plan = read_plan(&plan)?;
+            match service::verify_report(&plan, &report, max_age_secs) {
+                Ok(result) => {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                    Ok(())
+                }
+                Err(error) => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "format": "argos-service-report-verification-v1", "status": "rejected",
+                            "failure_code": error.code, "report_authenticated": false
+                        }))?
+                    );
+                    Err(error.into())
+                }
+            }
+        }
     }
 }
 
 fn read_plan(path: &Path) -> Result<ServiceRecoveryPlan, Box<dyn std::error::Error>> {
+    let path_before =
+        std::fs::symlink_metadata(path).map_err(|_| "서비스 복구 계획을 읽을 수 없습니다")?;
+    if !path_before.is_file() || path_before.file_type().is_symlink() {
+        return Err("서비스 복구 계획은 일반 파일이어야 합니다".into());
+    }
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(target_os = "linux")]
@@ -47,16 +87,48 @@ fn read_plan(path: &Path) -> Result<ServiceRecoveryPlan, Box<dyn std::error::Err
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    let file = options
+    let mut file = options
         .open(path)
         .map_err(|_| "서비스 복구 계획을 읽을 수 없습니다")?;
-    if !file.metadata()?.is_file() {
+    let before = file.metadata()?;
+    if !before.is_file() {
         return Err("서비스 복구 계획은 일반 파일이어야 합니다".into());
     }
     let mut bytes = Vec::new();
-    file.take((PLAN_LIMIT + 1) as u64).read_to_end(&mut bytes)?;
+    (&mut file)
+        .take((PLAN_LIMIT + 1) as u64)
+        .read_to_end(&mut bytes)?;
     if bytes.len() > PLAN_LIMIT {
         return Err("서비스 복구 계획이 64 KiB 제한을 초과했습니다".into());
+    }
+    let after = file.metadata()?;
+    let path_after =
+        std::fs::symlink_metadata(path).map_err(|_| "서비스 복구 계획이 읽는 중 변경되었습니다")?;
+    let same = |left: &std::fs::Metadata, right: &std::fs::Metadata| {
+        let same = left.is_file()
+            && right.is_file()
+            && left.len() == right.len()
+            && left.modified().ok() == right.modified().ok();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            same && left.dev() == right.dev()
+                && left.ino() == right.ino()
+                && left.ctime() == right.ctime()
+                && left.ctime_nsec() == right.ctime_nsec()
+        }
+        #[cfg(not(unix))]
+        {
+            same
+        }
+    };
+    if !same(&path_before, &before)
+        || !same(&before, &after)
+        || !same(&before, &path_after)
+        || path_after.file_type().is_symlink()
+        || bytes.len() as u64 != before.len()
+    {
+        return Err("서비스 복구 계획이 읽는 중 변경되었습니다".into());
     }
     // Do not echo parse errors: they can include the original, sensitive line.
     let text = std::str::from_utf8(&bytes).map_err(|_| "서비스 복구 계획은 UTF-8이어야 합니다")?;

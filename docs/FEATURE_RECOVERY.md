@@ -143,3 +143,5 @@ CLI `recovery-status`는 이 API 결과에 현재 감시 경로의 제한된 검
 ## v0.3.0 추가 확인
 
 파일 단위 시험 외에 [SQLite/PostgreSQL 네이티브 복구 검증](FEATURE_SERVICE_RECOVERY.md)을 제공한다. 정상본을 별도 서버에 보관하고 수신증명을 검증하려면 [원격 보관](FEATURE_REMOTE_VAULT.md)을 따른다.
+
+v0.4.0에서는 `service-recovery verify`로 과거 시험 보고서와 현재 계획·백업·시각을 대조할 수 있다. 정상 백업을 통신 장애에 대비해 보관하려면 [영속 전송 큐](FEATURE_VAULT_QUEUE.md)의 `enqueue-backup`을 사용한다.

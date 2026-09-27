@@ -1,6 +1,6 @@
 # Argos AI Security 소스 코드 안내
 
-기준: **v0.3.0, 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
+기준: **v0.4.0, 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
 
 ## 워크스페이스 입구
 
@@ -161,3 +161,12 @@ CLI의 `Command`·`PolicyAction`·`RetentionAction`은 명령 정의의 기준�
 | `argos-brain/src/validation.rs` | 근거 목록 검증·응답 JSON 인용 대조·고정 누락 안내 |
 
 구현 경계와 결과 해석은 [아키텍처 확장](ARCHITECTURE.md#v030-검증-경로와-별도-보관-경계)에 정리한다.
+
+## v0.4.0 내구성·일관성 검사 경로
+
+| 경로 | 읽을 부분 |
+| --- | --- |
+| `argos-vault/src/queue.rs`, `queue/tests.rs` | 고정 바이트·대상, SQLite 게시/재시도, 수신증명 커밋 후 정리 |
+| `argos-vault/src/quota.rs`, `quota_tests.rs` | Linux 작성자 잠금, 시작 스캔, 논리 계수·디스크 여유·요청 승인 |
+| `argos-recovery/src/service/verification.rs` | 정규화 계획·기대값 해시, 안정 파일 읽기, v2 검사·시각·백업 대조 |
+| `scripts/durability-scenarios.py` | 실제 CLI의 오프라인 큐·재시작·한도·복구 보고서 재검증 |

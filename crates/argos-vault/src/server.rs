@@ -1,3 +1,4 @@
+use crate::quota::{CapacityConfig, CapacityRejection, CapacityState};
 use crate::*;
 use axum::{
     body::{to_bytes, Body},
@@ -27,6 +28,8 @@ pub struct ServerConfig {
     pub agent_tokens: BTreeMap<String, String>,
     /// 비 loopback의 평문 수신은 명시적으로 선택한다. 운영은 TLS 프록시 사용 권장.
     pub allow_plain_http: bool,
+    /// 신규 객체의 논리 용량과 파일시스템 여유공간 보호.
+    pub capacity: CapacityConfig,
 }
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -40,6 +43,7 @@ impl Default for ServerConfig {
             admin_token: String::new(),
             agent_tokens: BTreeMap::new(),
             allow_plain_http: false,
+            capacity: CapacityConfig::default(),
         }
     }
 }
@@ -64,6 +68,7 @@ pub fn load_server_config(path: &Path) -> Result<ServerConfig> {
 struct Storage {
     config: ServerConfig,
     key: SigningKey,
+    capacity: CapacityState,
 }
 #[derive(Clone)]
 struct AppState {
@@ -105,10 +110,18 @@ pub fn router(config: ServerConfig) -> Result<Router> {
     }
     validate_private_directory(&config.dir)?;
     let key = load_key(&config.signing_key_file)?;
+    let capacity = CapacityState::open(
+        &config.dir,
+        config.capacity.clone(),
+        config.agent_tokens.keys().cloned(),
+        &key,
+        &config.key_id,
+    )?;
     let state = AppState {
         storage: Arc::new(Mutex::new(Storage {
             config: config.clone(),
             key,
+            capacity,
         })),
         config: Arc::new(config),
         permits: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -117,6 +130,7 @@ pub fn router(config: ServerConfig) -> Result<Router> {
         .route("/v1/objects/:hash", post(upload))
         .route("/v1/objects/:agent/:hash", get(download))
         .route("/v1/receipts/:agent/:hash", get(receipt))
+        .route("/v1/usage", get(usage))
         .with_state(state))
 }
 
@@ -190,12 +204,16 @@ async fn upload(
     }
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let storage = state.storage.lock().map_err(|_| "저장소 잠금 오류")?;
+        let mut storage = state.storage.lock().map_err(|_| "저장소 잠금 오류")?;
         storage.put(&agent, &hash, &kind, &body)
     })
     .await;
     match result {
         Ok(Ok(receipt)) => Json(receipt).into_response(),
+        Ok(Err(error)) if error.downcast_ref::<CapacityRejection>().is_some() => failure(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "신규 객체 보관 한도/여유공간/계수 상태로 거부됨",
+        ),
         // 내부 경로·키·토큰·오류 원문은 외부에 반환하지 않는다.
         _ => failure(StatusCode::CONFLICT, "보관 상태 충돌 또는 영속 저장 실패"),
     }
@@ -257,6 +275,25 @@ async fn receipt(
         _ => failure(StatusCode::NOT_FOUND, "검증 가능한 수신증명이 없습니다"),
     }
 }
+/// 전체 스캔 없이 메모리 계수와 현재 파일시스템 여유공간만 조회한다.
+async fn usage(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !admin(&state.config, &headers) {
+        return failure(StatusCode::UNAUTHORIZED, "조회 토큰 인증 실패");
+    }
+    let Ok(permit) = Arc::clone(&state.permits).try_acquire_owned() else {
+        return failure(StatusCode::SERVICE_UNAVAILABLE, "동시 요청 상한");
+    };
+    let result = tokio::task::spawn_blocking(move || -> Result<_> {
+        let _permit = permit;
+        let storage = state.storage.lock().map_err(|_| "저장소 잠금 오류")?;
+        Ok(storage.capacity.usage())
+    })
+    .await;
+    match result {
+        Ok(Ok(usage)) => Json(usage).into_response(),
+        _ => failure(StatusCode::SERVICE_UNAVAILABLE, "보관 사용량 조회 실패"),
+    }
+}
 impl Storage {
     fn directory(&self, agent: &str) -> Result<PathBuf> {
         let directory = self.config.dir.join(agent);
@@ -271,6 +308,7 @@ impl Storage {
             sync_directory(&self.config.dir)?;
         }
         validate_private_directory(&directory)?;
+        self.capacity.validate_directory(&directory)?;
         Ok(directory)
     }
     fn paths(&self, agent: &str, hash: &str) -> (PathBuf, PathBuf) {
@@ -280,45 +318,68 @@ impl Storage {
             dir.join(format!("{hash}.receipt.json")),
         )
     }
-    fn put(&self, agent: &str, hash: &str, kind: &str, bytes: &[u8]) -> Result<SignedReceipt> {
-        let directory = self.directory(agent)?;
+    fn put(&mut self, agent: &str, hash: &str, kind: &str, bytes: &[u8]) -> Result<SignedReceipt> {
         let (object_path, receipt_path) = self.paths(agent, hash);
+        // 이미 검증된 객체의 재전송은 사용량/여유공간이 가득 차도 유지한다.
         if receipt_path.exists() {
-            let (existing, _) = self.get(agent, hash)?;
+            let (existing, _) = match self.get(agent, hash) {
+                Ok(existing) => existing,
+                Err(error) => {
+                    self.capacity.write_failed();
+                    return Err(error);
+                }
+            };
             if existing.receipt.kind != kind || existing.receipt.size_bytes != bytes.len() as u64 {
                 return Err("기존 수신증명 메타데이터와 충돌합니다".into());
             }
-            sync_directory(&directory)?;
+            if let Err(error) = sync_directory(receipt_path.parent().ok_or("보관 부모 없음")?)
+            {
+                self.capacity.write_failed();
+                return Err(error);
+            }
             return Ok(existing);
         }
-        if object_path.exists() {
-            // ACK 전 중단으로 남은 객체는 해시 검증 후 증명을 새로 게시할 수 있다.
-            let previous = read_storage_file(&object_path, self.config.max_object_bytes)?;
-            if sha256(&previous) != hash || previous != bytes {
-                return Err("이미 존재하는 객체의 내용이 다릅니다".into());
-            }
-        } else {
-            write_new(&object_path, bytes)?;
+        // 시작 후 관리 경로에 추가된 미완료 객체도 조용히 덮거나 수락하지 않는다.
+        if object_path.symlink_metadata().is_ok() || receipt_path.symlink_metadata().is_ok() {
+            self.capacity.write_failed();
+            return Err(Box::new(CapacityRejection("incomplete_existing_object")));
         }
-        let received_at_ms = now_ms();
-        let receipt = sign(
-            Receipt {
-                format: FORMAT.into(),
-                key_id: self.config.key_id.clone(),
-                agent_id: agent.into(),
-                kind: kind.into(),
-                sha256: hash.into(),
-                size_bytes: bytes.len() as u64,
-                received_at_ms,
-                retention_until_ms: received_at_ms
-                    .checked_add(self.config.retention_secs * 1000)
-                    .ok_or("보존 시각 초과")?,
-            },
-            &self.key,
-        )?;
-        write_receipt_new(&receipt_path, &receipt)?;
-        sync_directory(&directory)?;
-        Ok(receipt)
+        self.capacity.reserve(agent, bytes.len() as u64)?;
+        let result = (|| -> Result<SignedReceipt> {
+            let directory = self.directory(agent)?;
+            write_new(&object_path, bytes)?;
+            let received_at_ms = now_ms();
+            let receipt = sign(
+                Receipt {
+                    format: FORMAT.into(),
+                    key_id: self.config.key_id.clone(),
+                    agent_id: agent.into(),
+                    kind: kind.into(),
+                    sha256: hash.into(),
+                    size_bytes: bytes.len() as u64,
+                    received_at_ms,
+                    retention_until_ms: received_at_ms
+                        .checked_add(self.config.retention_secs * 1000)
+                        .ok_or("보존 시각 초과")?,
+                },
+                &self.key,
+            )?;
+            write_receipt_new(&receipt_path, &receipt)?;
+            sync_directory(&directory)?;
+            Ok(receipt)
+        })();
+        match result {
+            Ok(receipt) => {
+                self.capacity.mark_receipted(agent);
+                Ok(receipt)
+            }
+            Err(error) => {
+                // 게시 실패 시 예약 계수를 되돌리지 않는다. 재시작 검증 전 신규 쓰기를
+                // 막아 부분 게시/동기화 결과를 과소 계수하지 않는다. 기존 조회는 유지한다.
+                self.capacity.write_failed();
+                Err(error)
+            }
+        }
     }
     fn get(&self, agent: &str, hash: &str) -> Result<(SignedReceipt, Vec<u8>)> {
         // 읽기 API는 없는 디렉터리를 생성하지 않는다.
@@ -352,3 +413,7 @@ fn read_storage_file(path: &Path, maximum: usize) -> Result<Vec<u8>> {
     }
     read_bounded(path, maximum)
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "quota_tests.rs"]
+mod quota_tests;

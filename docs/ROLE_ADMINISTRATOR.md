@@ -2,7 +2,7 @@
 
 이 문서는 Argos AI Security 플랫폼의 보안 정책을 수립, 서명 및 배포하고, 전체 시스템 노드의 관제 매개변수를 제어하는 **보안 관리자(Security Administrator)**를 위한 상세 운영 매뉴얼입니다.
 
-v0.3.0 기준이다. 실제 가동·복구는 [운영자](ROLE_OPERATOR.md), 사건 근거·격리는
+v0.4.0 기준이다. 실제 가동·복구는 [운영자](ROLE_OPERATOR.md), 사건 근거·격리는
 [분석가](ROLE_ANALYST.md)와 연결한다. 이 역할 구분은 업무 안내이며 CLI의 사용자별
 RBAC 기능을 뜻하지 않는다. 로컬 설정·DB 접근은 OS 계정과 파일 권한으로 통제한다.
 
@@ -120,3 +120,7 @@ argos --config /etc/argos/argos.toml policy show
 ## v0.3.0 추가 확인
 
 예외 정리 전 [정책 예외 감사](FEATURE_EXCEPTION_AUDIT.md)의 기간·누락·예외 제거 차이를 확인한다. [보관 서버](FEATURE_REMOTE_VAULT.md)는 에이전트 업로드 토큰과 관리자 조회 토큰·서명키를 분리해 운영한다.
+
+## v0.4.0 보관 운영 정책
+
+[서버·에이전트별 한도](FEATURE_VAULT_CAPACITY.md)와 최소 디스크 여유를 정한다. 부분 게시나 알 수 없는 파일로 신규 쓰기가 막혔을 때 자동 삭제로 정상 자료를 잃지 않도록 정합성을 검토한다. [전송 큐](FEATURE_VAULT_QUEUE.md)의 완료 수신증명 이력 보존·큐 교체 절차도 정한다. 복구 보고서 허용 나이는 업무별로 지정하며 무서명 보고서 재검증을 실행 출처 인증으로 간주하지 않는다.

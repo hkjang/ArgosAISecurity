@@ -1,8 +1,14 @@
 //! 별도 호스트의 추가 전용 보관 API와 고정 공개키로 검증하는 수신증명.
 //! 디스크 관리자/root가 보관 데이터를 바꾸지 못하게 하는 WORM 구현은 아니다.
 mod client;
+pub mod queue;
+mod quota;
 mod server;
-pub use client::{fetch_file, upload_file, VaultConfig};
+pub use client::{fetch_file, fetch_usage, upload_file, VaultConfig};
+pub use quota::{
+    AgentCapacityLimit, AgentCapacityUsage, CapacityConfig, CapacityUsage, FilesystemCapacity,
+    ObjectUsage,
+};
 pub use server::{load_server_config, router, ServerConfig};
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};

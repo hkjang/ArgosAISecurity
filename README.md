@@ -15,16 +15,19 @@
 
 <hr />
 
-## 현재 릴리즈: v0.3.0
+## 현재 릴리즈: v0.4.0
 
-[v0.3.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.3.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.3.0.md)
+[v0.4.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.4.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.4.0.md)
 
-2026-09-27 기준, 기존 탐지·정책 신뢰·정상본 보존에 **보호 경로 공백 검사, SQLite/PostgreSQL 복구 검증, 원격 보관 수신증명, 승인 예외 감사, AI 인용 검사**를 추가했습니다. 자동 차단은 기본 비활성입니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
+2026-09-27 기준, **통신 단절 후 이어 보내는 보관 대기열, 서버·에이전트별 보관 용량 보호, 현재 계획·백업에 대한 복구 시험 보고서 재검증**을 추가했습니다. 보호 경로 공백 검사·정책 예외 감사·AI 인용 검사는 계속 제공합니다. 자동 차단은 기본 비활성입니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
 
-워크스페이스 테스트 **188개**와 별도 PostgreSQL 시험이 통과했습니다. 실제 CLI·에이전트 시나리오의 결과·환경·미검증 범위는 [검증 기록](docs/PLATFORM_VALIDATION.md)에 정리합니다. PostgreSQL 드릴에는 별도 PostgreSQL 설치와 Linux bubblewrap이 필요합니다.
+워크스페이스 테스트 **220개**와 별도 PostgreSQL 복원 시험이 통과했습니다. 실제 CLI·에이전트 시나리오의 결과·환경·미검증 범위는 [검증 기록](docs/PLATFORM_VALIDATION.md)에 정리합니다. PostgreSQL 드릴에는 별도 PostgreSQL 설치와 Linux bubblewrap이 필요합니다.
 
 | 추가 기능 | 시작 명령·안내 |
 | --- | --- |
+| 보관 전송 대기열 | `vault queue enqueue`, `vault queue drain`, `vault queue status` — [재시도·고정 바이트](docs/FEATURE_VAULT_QUEUE.md) |
+| 보관 용량 보호 | `vault usage` — [전체·에이전트 한도와 디스크 여유](docs/FEATURE_VAULT_CAPACITY.md) |
+| 복구 보고서 재검증 | `service-recovery verify --plan PLAN --report REPORT --max-age-secs 86400` — [계획·백업·시간 확인](docs/FEATURE_SERVICE_RECOVERY.md) |
 | 보호 공백과 이벤트 전달 | `coverage status`, `coverage probe` — [범위·제약](docs/FEATURE_COVERAGE.md) |
 | 네이티브 DB 복구 시험 | `service-recovery test --plan PLAN --out NEW_DIR` — [SQLite/PostgreSQL](docs/FEATURE_SERVICE_RECOVERY.md) |
 | 별도 서버 보관·서명 수신증명 | `vault upload-backup`, `vault upload-evidence`, `vault fetch` — [보관 서버](docs/FEATURE_REMOTE_VAULT.md) |
@@ -44,7 +47,7 @@
 | 백업·복구 | `argos-recovery` | 정상본 판정·미리보기·복구 시험, 사건별 보존과 승인 해제 |
 | 정책 신뢰·재생 | `argos-policy` | Ed25519, 버전·기간·대상·키 ID, 감사 기록·승인 롤백·과거 이벤트 비교 |
 | AI Threat Summary / Copilot | `argos-brain` | Anthropic/Ollama, 기간·PID별 근거 및 조회 누락 표시 |
-| 원격 보관 서버 | `argos-vault` | 추가 전용 API, 역할별 토큰·Ed25519 수신증명·고정 키 검증 |
+| 원격 보관 서버 | `argos-vault` | 추가 전용 API, 역할별 토큰·서명 수신증명, 영속 전송 큐·용량 보호 |
 | 중앙관리 서버 + 대시보드 | `argos-central` | 인증된 등록·수집·조회, 생존 신호·전달 중복 제거 |
 | CLI | `argos-cli` | 운영 조회·복구·정책·조사, 조회형 MCP, HTML 보고서·증거 패키지 |
 
@@ -196,7 +199,7 @@ argos mcp # 설정한 단일 호스트 DB를 조회하는 stdio MCP 서버
 
 | 목적 | 문서 |
 | --- | --- |
-| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.3.0 변경 사항](docs/releases/v0.3.0.md) |
+| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.4.0 변경 사항](docs/releases/v0.4.0.md) |
 | 일상 운영·사고 조사 | [운영자](docs/ROLE_OPERATOR.md), [분석가](docs/ROLE_ANALYST.md), [관리자](docs/ROLE_ADMINISTRATOR.md) |
 | 명령·서비스 설정 | [CLI](docs/SERVICE_CLI.md), [에이전트](docs/SERVICE_AGENT.md), [중앙 서버](docs/SERVICE_CENTRAL.md) |
 | 구현과 후속 요구 | [아키텍처](docs/ARCHITECTURE.md), [코드 분석](docs/SOURCE_CODE_ANALYSIS.md), [요건서](docs/REQUIREMENTS.md), [로드맵](docs/ROADMAP.md) |

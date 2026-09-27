@@ -1,6 +1,6 @@
 # 검증 가능한 보안 플랫폼: 구현과 검증 기록
 
-기준: `v0.3.0`과 이전 릴리즈 검증 기록. v0.3.0 검증일: 2026-09-27. v0.2.0 릴리즈 검증일: 2026-09-27, v0.1.0 검증일: 2026-09-26. 자동 차단 기본값은 계속 비활성이다.
+기준: `v0.4.0`과 이전 릴리즈 검증 기록. v0.4.0 검증일: 2026-09-27. v0.3.0 검증일: 2026-09-27. v0.2.0 릴리즈 검증일: 2026-09-27, v0.1.0 검증일: 2026-09-26. 자동 차단 기본값은 계속 비활성이다.
 
 ## 구현 범위
 
@@ -18,6 +18,27 @@
 | 인증/격리 | 운영 관리자/개별 에이전트 토큰 필수, loopback 개발 모드, 비밀값 마스킹, 명시적 관리 IP·방향·포트만 허용, IPv4/IPv6 INPUT/OUTPUT/FORWARD 제한 |
 | 조사 | 기간·PID 기반 근거 조회, 조회 누락·근거 ID, Anthropic/Ollama 설정, 조회형 MCP, 시간순 재생 HTML, 복구 준비도 HTML |
 | 증거 패키지 | 기본 문자열 마스킹, 사건 근거·대응 이력·수락 정책 스냅샷, SHA-256 manifest 및 파일 목록 검증 |
+
+## v0.4.0 보관 지속성·용량·복구 보고서
+
+- `cargo test --workspace --offline --locked`: **220개 통과**, 실패 0개. 별도 PostgreSQL 18.6 네이티브 복원 시험 **1개도 통과**했다.
+- 최적화 빌드와 CLI 통합 시험 통과: 기존 스모크·중앙/MCP 검증, 보안 8개, 보호/AI 5개, 보관 4개, SQLite/PostgreSQL 15개, 신규 영속성 7개 시나리오. 신규 시나리오는 원본 삭제 뒤 큐 전송/서버 재시작·용량 초과·보고서 조건 변경·정상본/증거 어댑터 및 패키지 자기 경로 거부를 포함한다.
+- 최신 CLI에서 DB 없는 객체 경로·다른 SQLite DB·기존 DB 유실·대상 기록 삭제·항목 테이블 삭제 5가지를 독립 재현했고, 실패 전후 파일 목록과 SHA-256이 모두 같았다. 새 큐 등록과 중복 등록은 정상 처리했다.
+- 문서의 상대 링크 343개·앵커 39개·TOML 예제 17개, 사이트 JSON-LD와 JavaScript 문법, 변경 Rust 포맷·diff 검사를 통과했다.
+- 큐: 당시 바이트·대상/키 고정, ACK 유실·재시작·backoff·잘못된 서명, 용량/배치·조회·다중 프로세스 잠금을 검증했다. 초기화 중단·DB 유실·다른 스키마·대상 기록 유실은 남은 스냅샷을 지우거나 새 DB로 재초기화하지 않고 거부한다.
+- 용량: 전체/개별 바이트와 객체 수를 독립 검증하고 동시 예약·여유 하한·시작 재구성·서명/대상 불일치·부분 게시·스캔 상한을 확인했다. 신규 저장 거부 상태의 기존 조회·동일 재전송과 작성자 프로세스 잠금을 검사했다. 실제 디스크를 가득 채우지는 않았다.
+- 복구 보고서: 정규화 계획/기대값·정확한 검사 집합·최소 행 수·시각·백업 결합을 확인했다. 링크/FIFO/과대 입력·읽는 중 변경/교체는 거부한다. 짧은 간격의 같은 크기 변경 시험에서 확인한 시각 해상도 한계를 보완해, 같은 descriptor의 두 번 전체 읽기 해시까지 대조한다. 무서명 출처 인증이나 배타 스냅샷 검증은 아니다.
+
+```bash
+cargo test --workspace --offline --locked
+cargo build --release --workspace --offline --locked
+python3 scripts/durability-scenarios.py --bin-dir target/release --report /tmp/argos-durability-new.json
+python3 scripts/vault-scenarios.py --bin-dir target/release --report /tmp/argos-vault-new.json
+python3 scripts/service-recovery-scenarios.py --bin-dir target/release --pg-root /path/to/trusted/postgresql/root
+ARGOS_TEST_POSTGRES_ROOT=/path/to/trusted/postgresql/root cargo test -p argos-recovery postgresql_custom_archive --offline --locked -- --ignored
+```
+
+새 시나리오는 합성 자료와 임시 loopback 서버를 사용한다. 큐의 ACK 유실 처리는 로컬 파일시스템·SQLite 동기화·신뢰한 수신증명에 의존하며 전원 차단·NFS·root 삭제를 시험한 것은 아니다. 논리 한도·공간 조회는 물리 공간 예약이나 외부 프로세스 소비 통제가 아니다. 복구 보고서의 두 번 읽기는 약 2배의 입력 읽기 비용이 있고 같은 제한 시간을 공유한다.
 
 ## v0.3.0 보호·복구·근거 검증
 

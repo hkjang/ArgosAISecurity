@@ -342,7 +342,9 @@ def main():
         report["passed_scenarios"] = len(scenarios.results)
         report["temporary_files_retained"] = bool(args.keep or exit_code)
         if args.report:
-            args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            with args.report.open("x", encoding="utf-8") as output:
+                os.chmod(args.report, 0o600)
+                output.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
         if args.keep or exit_code:
             print(f"임시 결과 보존: {work}", flush=True)
         else:

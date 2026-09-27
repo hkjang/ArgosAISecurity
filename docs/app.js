@@ -1,4 +1,4 @@
-/** v0.3.0 landing page copy and illustrative CLI workflows. No backend calls. */
+/** v0.4.0 landing page copy and illustrative CLI workflows. No backend calls. */
 const i18n = {
   "ko": {
     "nav_features": "핵심 기능",
@@ -6,12 +6,12 @@ const i18n = {
     "nav_architecture": "아키텍처",
     "nav_recovery": "복구 메커니즘",
     "nav_faq": "자주 묻는 질문",
-    "hero_badge": "v0.3.0 · Linux 보안 플랫폼",
+    "hero_badge": "v0.4.0 · Linux 보안 플랫폼",
     "hero_title": "차단과 복구를 검증하는 Linux 보안<br><span class=\"text-gradient\">Argos AI Security</span>",
-    "hero_subtitle": "파일·프로세스 행위 분석에 보호 공백 검사, 네이티브 DB 복구 시험과 원격 보관을 더했습니다. 정책 예외를 재생하고 AI 답변의 근거 인용을 검사합니다.",
+    "hero_subtitle": "통신이 끊겨도 등록한 파일을 이어 보내고, 보관 한도와 디스크 여유를 확인합니다. 복구 시험 결과가 현재 계획·백업에도 유효한지 다시 검증합니다.",
     "btn_quickstart": "빠른 시작 가이드",
     "btn_demo": "CLI 데모 체험",
-    "metric_time": "v0.3.0",
+    "metric_time": "v0.4.0",
     "metric_time_label": "공개 릴리즈",
     "metric_recovery": "SHA-256",
     "metric_recovery_label": "복구 객체 무결성 검증",
@@ -26,11 +26,11 @@ const i18n = {
     "feat2_title": "내용 표본과 엔트로피",
     "feat2_desc": "기본 앞부분 64 KiB를 분석하며, 선택 기능으로 읽기 예산을 앞·중간·끝에 나눕니다. 이전 관측과 파일 유형을 비교하지만 파일 전체 검사나 공격 판정을 보증하지는 않습니다.",
     "feat3_title": "정상본 복구·사건 보존",
-    "feat3_desc": "검토한 정상본의 별도 경로 복구와 사건 보존을 지원합니다. SQLite·PostgreSQL 백업을 새 환경에서 복원하고 DB 스키마·행 수·쓰기 롤백을 검사합니다.",
+    "feat3_desc": "정상본 미리보기와 사건 보존, SQLite·PostgreSQL 복구 시험을 지원합니다. 보고서의 계획·백업·필수 검사·나이를 대조하며, 무서명 보고서의 출처 인증과는 구별합니다.",
     "feat4_title": "서명 정책·사전 검증",
     "feat4_desc": "서명·버전·유효기간·대상·키 ID를 검사합니다. 저장 이벤트로 정책을 비교하고 승인 예외의 매칭·만료·범위와 예외 제거 영향을 확인합니다.",
     "feat5_title": "근거 기반 AI·증거 패키지",
-    "feat5_desc": "AI의 근거 종류·ID·시각·출처를 조회 목록과 대조합니다. 증거 패키지·정상본을 별도 서버에 보관하고 고정 공개키로 서명 수신증명을 검사합니다.",
+    "feat5_desc": "AI 인용을 실제 근거와 대조합니다. 검증한 증거·정상본을 영속 대기열로 전송하고 서명 수신증명을 확인합니다. 서버는 전체·에이전트 한도와 디스크 여유를 검사합니다.",
     "feat6_title": "프로세스 차단·네트워크 격리",
     "feat6_desc": "자동 차단을 켠 Linux 호스트에서 PID·시작 시각·부팅 ID를 확인하고 종료 결과를 기록합니다. 별도 격리 명령은 IPv4/IPv6의 명시적 관리 연결만 허용합니다.",
     "sec_cli_title": "CLI 사용 흐름 살펴보기",
@@ -58,12 +58,12 @@ const i18n = {
     "faq3_q": "Q3. AI에 어떤 데이터가 전달되나요?",
     "faq3_a": "설정한 제공자에 저장된 이벤트·탐지·프로세스·대응 근거를 전달합니다. 파일 본문을 직접 보내지는 않지만 경로·명령행·계정 정보에도 민감한 값이 있을 수 있습니다. Anthropic은 외부 API이며, Ollama는 지정한 사내 주소로 구성할 수 있습니다. 모델 ID와 조회 범위를 확인하세요.",
     "faq4_q": "Q4. 어떤 환경에서 사용할 수 있나요?",
-    "faq4_a": "v0.3.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다.",
+    "faq4_a": "v0.4.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다.",
     "footer_tagline": "차단·정상본 복구·사건 근거를 검증하는 Linux 보안 플랫폼",
     "footer_quick_inquiry": "문의 요청:",
     "footer_rights": "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0.",
     "nav_docs": "문서",
-    "btn_download": "v0.3.0 다운로드"
+    "btn_download": "v0.4.0 다운로드"
   },
   "en": {
     "nav_features": "Features",
@@ -71,12 +71,12 @@ const i18n = {
     "nav_architecture": "Architecture",
     "nav_recovery": "Recovery",
     "nav_faq": "FAQ",
-    "hero_badge": "v0.3.0 · Linux security platform",
+    "hero_badge": "v0.4.0 · Linux security platform",
     "hero_title": "Linux security with verifiable response and recovery<br><span class=\"text-gradient\">Argos AI Security</span>",
-    "hero_subtitle": "File and process analysis with coverage-gap checks, native database recovery drills and remote retention. Replay policy exceptions and validate the citations in AI answers.",
+    "hero_subtitle": "Resume queued files after connection failures and check storage limits and free space. Revalidate recovery drill results against the current plan and backup.",
     "btn_quickstart": "Quick Start Guide",
     "btn_demo": "Interactive CLI Demo",
-    "metric_time": "v0.3.0",
+    "metric_time": "v0.4.0",
     "metric_time_label": "Published release",
     "metric_recovery": "SHA-256",
     "metric_recovery_label": "Recovery object integrity",
@@ -91,11 +91,11 @@ const i18n = {
     "feat2_title": "Content samples and entropy",
     "feat2_desc": "The default reads up to 64 KiB from the beginning. Optional sampling divides a read budget across the beginning, middle and end and compares prior observations and file types. It does not inspect every byte.",
     "feat3_title": "Reviewed recovery and incident retention",
-    "feat3_desc": "Preview reviewed backups and retain incident references. Restore SQLite and PostgreSQL backups into a new environment, then check schemas, row counts and write rollback.",
+    "feat3_desc": "Preview reviewed backups, retain incident references and run SQLite/PostgreSQL recovery drills. Check report plans, backup bytes, required checks and age; unsigned report provenance is not authenticated.",
     "feat4_title": "Signed policies and preflight comparison",
     "feat4_desc": "Check signatures, versions, validity, targets and key IDs. Replay recorded events to compare policies and examine exception matches, expiry, scope and removal impact.",
     "feat5_title": "Evidence-based AI and export",
-    "feat5_desc": "Match AI evidence types, IDs, timestamps and sources against the supplied records. Retain packages and reviewed backups on a separate server and verify signed receipts with a pinned key.",
+    "feat5_desc": "Match AI citations against real records. Queue verified packages and backups for delivery and validate signed receipts. The server checks global and per-agent limits and available disk space.",
     "feat6_title": "Process response and network isolation",
     "feat6_desc": "With blocking enabled on Linux, verify PID, start time and boot ID before termination and record the result. Separate IPv4/IPv6 isolation commands allow only explicit management connections.",
     "sec_cli_title": "Explore the CLI workflow",
@@ -123,12 +123,12 @@ const i18n = {
     "faq3_q": "Q3. Which data is sent to the AI provider?",
     "faq3_a": "Stored file, detection, process and response evidence goes to the configured provider. File bodies are not sent directly, but paths, command lines and account information can still contain sensitive values. Anthropic uses an external API; Ollama can use your on-premises endpoint. Configure the model ID and review the query scope.",
     "faq4_q": "Q4. Which environments are supported?",
-    "faq4_a": "The v0.3.0 binaries target GNU/Linux x86_64 with glibc 2.39 or later. Source builds require Rust 1.86 or later. notify also provides a development path for other operating systems, but this release supplies no Windows/macOS binaries or execution validation. fanotify, process response and isolation need Linux support and permissions.",
+    "faq4_a": "The v0.4.0 binaries target GNU/Linux x86_64 with glibc 2.39 or later. Source builds require Rust 1.86 or later. notify also provides a development path for other operating systems, but this release supplies no Windows/macOS binaries or execution validation. fanotify, process response and isolation need Linux support and permissions.",
     "footer_tagline": "A Linux platform for verifiable response, reviewed recovery and incident evidence",
     "footer_quick_inquiry": "Inquiry:",
     "footer_rights": "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0.",
     "nav_docs": "Docs",
-    "btn_download": "Download v0.3.0"
+    "btn_download": "Download v0.4.0"
   }
 };
 

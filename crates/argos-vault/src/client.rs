@@ -37,7 +37,9 @@ impl std::fmt::Debug for VaultConfig {
             .finish()
     }
 }
-fn connection(config: &VaultConfig) -> Result<(reqwest::blocking::Client, reqwest::Url)> {
+pub(crate) fn connection(
+    config: &VaultConfig,
+) -> Result<(reqwest::blocking::Client, reqwest::Url)> {
     let url = reqwest::Url::parse(&config.endpoint)?;
     if !url.username().is_empty()
         || url.password().is_some()
@@ -81,7 +83,7 @@ fn connection(config: &VaultConfig) -> Result<(reqwest::blocking::Client, reqwes
     let client = builder.build()?;
     Ok((client, url))
 }
-fn token(value: &str) -> Result<&str> {
+pub(crate) fn token(value: &str) -> Result<&str> {
     if value.trim() != value
         || value.len() < 16
         || value.len() > 4096
@@ -124,11 +126,22 @@ fn expected(receipt: &SignedReceipt, config: &VaultConfig, agent: &str, hash: &s
 
 /// 한 번 읽어 검증한 같은 바이트를 해시하고 전송한다.
 pub fn upload_file(config: &VaultConfig, path: &Path, kind: &str) -> Result<SignedReceipt> {
-    let (client, endpoint) = connection(config)?;
-    if !valid_id(&config.agent_id) || !valid_kind(kind) {
-        return Err("에이전트 ID/보관 종류 오류".into());
-    }
+    // 설정 검사를 먼저 수행하고, 한 번 읽어 안정성을 검사한 같은 바이트를 넘긴다.
+    connection(config)?;
     let bytes = read_bounded(path, config.max_object_bytes)?;
+    upload_bytes(config, bytes, kind)
+}
+
+/// 호출자가 스냅샷 해시를 확인한 바로 그 바이트를 전송한다. 경로를 다시 읽지 않는다.
+pub(crate) fn upload_bytes(
+    config: &VaultConfig,
+    bytes: Vec<u8>,
+    kind: &str,
+) -> Result<SignedReceipt> {
+    let (client, endpoint) = connection(config)?;
+    if !valid_id(&config.agent_id) || !valid_kind(kind) || bytes.len() > config.max_object_bytes {
+        return Err("에이전트 ID/보관 종류/본문 크기 오류".into());
+    }
     let hash = sha256(&bytes);
     let size = bytes.len() as u64;
     let response = client
@@ -179,4 +192,17 @@ pub fn fetch_file(
     verify_body(&bytes, &receipt)?;
     write_new(destination, &bytes)?;
     Ok(receipt)
+}
+
+/// 관리자용 용량 조회. TLS/대상 설정은 업로드와 같고 응답은 서명 수신증명이 아니다.
+pub fn fetch_usage(config: &VaultConfig) -> Result<CapacityUsage> {
+    let (client, endpoint) = connection(config)?;
+    let response = client
+        .get(endpoint.join("v1/usage")?)
+        .bearer_auth(token(&config.admin_token)?)
+        .send()?;
+    Ok(serde_json::from_slice(&read_response(
+        response,
+        8 * 1024 * 1024,
+    )?)?)
 }
