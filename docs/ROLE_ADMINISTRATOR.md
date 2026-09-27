@@ -2,7 +2,7 @@
 
 이 문서는 Argos AI Security 플랫폼의 보안 정책을 수립, 서명 및 배포하고, 전체 시스템 노드의 관제 매개변수를 제어하는 **보안 관리자(Security Administrator)**를 위한 상세 운영 매뉴얼입니다.
 
-v0.5.0 기준이다. 실제 가동·복구는 [운영자](ROLE_OPERATOR.md), 사건 근거·격리는
+v0.6.0 기준이다. 실제 가동·복구는 [운영자](ROLE_OPERATOR.md), 사건 근거·격리는
 [분석가](ROLE_ANALYST.md)와 연결한다. 이 역할 구분은 업무 안내이며 CLI의 사용자별
 RBAC 기능을 뜻하지 않는다. 로컬 설정·DB 접근은 OS 계정과 파일 권한으로 통제한다.
 
@@ -126,3 +126,10 @@ argos --config /etc/argos/argos.toml policy show
 [서버·에이전트별 한도](FEATURE_VAULT_CAPACITY.md)와 최소 디스크 여유를 정한다. 부분 게시나 알 수 없는 파일로 신규 쓰기가 막혔을 때 자동 삭제로 정상 자료를 잃지 않도록 정합성을 검토한다. [전송 큐](FEATURE_VAULT_QUEUE.md)의 완료 수신증명 이력 보존·큐 교체 절차도 정한다. 복구 보고서 허용 나이는 업무별로 지정하며 무서명 보고서 재검증을 실행 출처 인증으로 간주하지 않는다.
 
 v0.5.0부터 [예약 전송](FEATURE_VAULT_SCHEDULER.md)을 선택 설치할 수 있다. pending/leased/failed 상태와 archive 예약 슬롯을 점검하고, 완료 수신증명은 [별도 내보내기](FEATURE_VAULT_QUEUE.md)로 보관한다. 업그레이드 전에 구버전 작업자를 모두 종료한다.
+
+
+## v0.6.0 원격 복구 판정 관리
+
+[복구 묶음](FEATURE_RECOVERY_BUNDLE.md)의 업로드와 관리자 조회/검토 토큰을 분리한다. 보관 완료만으로 정상본이 되지 않으므로 구성 목록·계획·업무 내용을 검토한 뒤 `vault bundle review --decision good`를 실행한다. 취소는 새 request-id의 revoked 기록이며 실패 응답을 적용 성공으로 취급하지 않는다. 로컬 정상본 취소는 자동 전파되지 않는다.
+
+서버 저장소·카탈로그·키를 함께 보존하고 전체 10,000개/에이전트 1,000개 묶음 및 객체 용량을 관리한다. 번들별 검토는 100개이며 마지막 슬롯은 취소에 사용한다. 번들 게시 뒤 저장소를 v0.5 이하 서버로 그대로 되돌리지 않는다. 개인 승인자 인증과 시험 실행자 서명은 아직 제공하지 않는다. [명령 절차](FEATURE_RECOVERY_BUNDLE_CLI.md)를 참고한다.

@@ -1,6 +1,6 @@
 # Argos AI Security 소스 코드 안내
 
-기준: **v0.5.0, 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
+기준: **v0.6.0, 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
 
 ## 워크스페이스 입구
 
@@ -174,3 +174,17 @@ CLI의 `Command`·`PolicyAction`·`RetentionAction`은 명령 정의의 기준�
 ## v0.5.0 큐 운영 경로
 
 `argos-vault/src/queue.rs`와 하위 모듈은 schema v2 이전·완료 이력·임대·내보내기를 담당한다. `client.rs`는 HTTP/연결/무결성 오류를 민감 본문 없이 분류한다. `packaging/argos-vault-upload.{service,timer}`는 별도 계정의 제한된 drain 호출을 예약한다. 실제 동시 등록·이력 검증은 `scripts/queue-operations-scenarios.py`를 참고한다.
+
+
+## v0.6.0 원격 복구 묶음 경로
+
+| 파일 | 코드 검토 지점 |
+| --- | --- |
+| `argos-vault/src/bundle.rs`, `bundle/client.rs` | manifest·서명 완료·연결 검토 형식, 16MiB 스트리밍 준비·1GiB 상한, 원격 조회·재조립·최종 판정 재조회 |
+| `argos-vault/src/bundle/server.rs` | 카탈로그·게시 의도·완료 해시 검사·권한 분리·취소 중단과 복구 보류 |
+| `argos-cli/src/vault_bundle.rs` | offline prepare/enqueue, 명시적 publish, 원본 DB 없는 test, 단일 JSON/실패 코드 |
+| `argos-cli/src/service_recovery.rs::supervise_report` | 기존 시간·프로세스·출력·자원 제한을 유지한 보고서 반환. 기존 CLI wrapper는 출력과 종료 코드 유지 |
+
+`test`는 서명된 원격 record를 확인하고 backup_path만 새 파일로 바꾼다. `verify_report`가 계획·필수 검사·백업 전체 해시를 대조한 뒤 remote get으로 현재 good/동일 manifest·completion을 다시 확인한다. report_authenticated와 trial_executor_authenticated는 false다. 사건 3파일 자동 묶음·로컬 취소 자동 전파·당시 정책 해시 고정·AI 주장 의미 검사·내장 빌드 커밋은 별도 후속 작업이다.
+
+`scripts/bundle-recovery-scenarios.py`는 실제 CLI와 합성 SQLite 백업으로 부분 전송·원본 자료 제거·원격 복구 시험·판정 취소·실패 결과를 확인한다. 측정 환경과 결과는 [검증 기록](PLATFORM_VALIDATION.md)을 따른다.

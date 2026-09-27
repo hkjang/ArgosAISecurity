@@ -1,7 +1,7 @@
 # Argos 보안 관제·분석가 가이드
 
 분석가는 탐지 근거와 실제 대응 결과를 구분하고, 프로세스 신원·파일 변화·보호 누락을
-조사한 뒤 증거를 인계한다. 이 문서는 v0.5.0 기준이다. 정책 변경은
+조사한 뒤 증거를 인계한다. 이 문서는 v0.6.0 기준이다. 정책 변경은
 [보안 관리자](ROLE_ADMINISTRATOR.md), 파일 복구는 [운영자](ROLE_OPERATOR.md)와 협업한다.
 
 ## 조사 범위 확인
@@ -105,3 +105,10 @@ AI 답변은 [인용 검사](FEATURE_AI_VALIDATION.md)를 통과해도 원문 �
 ## v0.4.0 인계 확인
 
 증거 패키지를 [대기열](FEATURE_VAULT_QUEUE.md)에 넣었어도 모든 파일의 `sent`와 수신증명을 확인하기 전에는 원격 보관 완료로 표시하지 않는다. `queue show --id`로 항목별 증명을 확인한다. [복구 보고서](FEATURE_SERVICE_RECOVERY.md)의 일관성 성공은 무서명 보고서의 출처 인증과 구별한다.
+
+
+## v0.6.0 원격 복구 근거 조사
+
+`vault bundle show`에서 원래 경로·버전·참고 판정 이력과 원격 서버가 서명한 완료/검토 이력을 구별한다. 최초 상태는 unknown이며 업로드한 원본 판정 이력이 원격 good로 승격되지 않는다. 사고 조사를 위해 완료된 unknown/revoked 바이트가 필요하면 `fetch --evidence-only`를 사용하되 복구 추천으로 취급하지 않는다.
+
+[복구 시험](FEATURE_RECOVERY_BUNDLE_CLI.md)의 remote-record.json과 bundle-test.json을 함께 인계한다. 전자는 서버가 서명한 보관·검토 자료이며 후자의 로컬 시험 출처는 인증되지 않는다. 현재 묶음은 백업 한 파일과 메타데이터용이다. evidence.json/policy.json/manifest.json 사건 패키지의 자동 원자적 게시와 사고 당시 정책·근거 결합 원장은 후속이다.

@@ -1,6 +1,6 @@
 # Argos CLI 명령 가이드
 
-`argos`는 v0.5.0의 로컬 조사·복구·정책 관리 도구다. 에이전트와 같은 설정을 지정한다.
+`argos`는 v0.6.0의 조사·복구·정책 관리 도구다. 로컬 조사에는 에이전트와 같은 설정을 지정한다. `vault bundle`은 별도 보관 설정을 사용하며 원본 에이전트 DB를 읽지 않는다.
 명령은 해당 DB·백업에 필요한 OS 권한이 있는 계정으로 실행한다. 중앙 관리자 토큰이
 로컬 CLI 권한을 부여하지는 않는다. 명령별 옵션은 `argos <명령> --help`, 정책·보존 작업은 `argos policy --help`와
 `argos retention --help`에서 확인한다.
@@ -154,3 +154,22 @@ sudo argos isolate --release
 보관 설정은 별도 TOML이며 Linux에서 현재 계정 소유·0600 권한을 요구한다. DB 복구 시험·파일 등록은 명시적인 CLI 작업이다. `service-recovery`, 보관 키 생성/업로드/검증/받기는 관련 없는 에이전트 설정을 읽지 않는다. `vault upload-backup`과 `vault queue enqueue-backup`은 로컬 백업 설정을 읽는다. 대기열은 `drain` 호출로 처리한다. 선택한 [systemd timer](FEATURE_VAULT_SCHEDULER.md)로 예약 전송할 수 있다.
 
 [보호 공백](FEATURE_COVERAGE.md), [DB 복구](FEATURE_SERVICE_RECOVERY.md), [원격 보관](FEATURE_REMOTE_VAULT.md), [영속 전송](FEATURE_VAULT_QUEUE.md), [용량 보호](FEATURE_VAULT_CAPACITY.md), [예외 감사](FEATURE_EXCEPTION_AUDIT.md), [AI 인용 검사](FEATURE_AI_VALIDATION.md)의 전제와 결과 해석을 따른다. `ask`·`explain`은 잘못된 인용이나 JSON 형식을 오류로 처리하며 검증되지 않은 모델 원문을 대신 출력하지 않는다.
+
+
+## v0.6.0 원격 복구 묶음
+
+prepare를 제외한 아래 명령은 `argos vault --vault-config FILE bundle ...` 형태로 호출한다. 준비·출력 경로는 현재 계정 소유의 전용 0700 부모 아래 새 절대 경로를 사용한다.
+
+| 명령 | 동작 |
+| --- | --- |
+| `prepare --file FILE --out NEW_STAGE --original-path /PATH [--version N] [--plan TOML] [--review-history JSON]` | 최대 1GiB를 16MiB 청크와 manifest로 준비. 통신 없음 |
+| `enqueue --stage STAGE --directory QUEUE [--max-items 1000 --max-bytes 268435456]` | 검증 청크를 큐에 고정. 통신 없음·부분 등록 보존 |
+| `publish --manifest STAGE/manifest.json` | manifest 등록 및 모든 청크/전체 해시 완료 검사. 누락 시 실패 |
+| `upload --stage STAGE` | 직접 업로드 후 완료. 같은 stage로 재시도 가능 |
+| `list --agent-id ID [--after CURSOR --limit 100]` | 관리자 원격 목록. 최대 100개/페이지 |
+| `show --agent-id ID --id BUNDLE_ID` | 서명된 구성/완료/검토 이력과 현재 상태 |
+| `review --agent-id ID --id BUNDLE_ID --request-id REQUEST --decision good\|revoked --actor NAME --reason TEXT` | 관리자 검토 추가. 담당자 문자열은 개인 인증 아님 |
+| `fetch --agent-id ID --id BUNDLE_ID --out NEW_FILE [--evidence-only]` | 청크·전체 해시와 현재 판정 확인 후 새 파일 재조립 |
+| `test --agent-id ID --id BUNDLE_ID --out NEW_DIR` | 내장 계획의 backup_path만 변경해 DB 시험·보고서 일관성·최종 good 재확인 |
+
+일반 fetch/test는 unknown·revoked·미완료를 거부한다. evidence-only는 완성된 조사 자료만 허용하며 복구 추천이 아니다. test는 stdout 단일 JSON과 bundle-test.json을 기록하고, 실패 시 recommended=false 및 0이 아닌 종료 코드를 반환한다. report_authenticated=false는 서버 검토 서명과 구분한다. [전체 예시·오류·출력](FEATURE_RECOVERY_BUNDLE_CLI.md)을 참고한다.

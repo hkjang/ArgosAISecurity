@@ -142,3 +142,7 @@ ARGOS_TEST_POSTGRES_ROOT=/path/to/trusted/postgresql-package-root \
 ```
 
 SQLite 원본 불변·쓰기 롤백·기대 행 수 실패·기존 작업 경로 거부·WAL 동반 입력 거부·SQL 식별자 주입 거부와 PostgreSQL 복원·제약·서버 종료·시간 초과를 확인합니다. PostgreSQL 시간 초과 fixture에는 고정 2초 지연 트리거를 넣어 빠른 장비에서도 제한 시간 동작을 재현합니다. 이는 검증 스크립트의 고정 합성 SQL이며 제품 계획에서 임의 SQL을 허용하는 기능이 아닙니다. 선택 PostgreSQL 테스트는 쓰기 가능한 경로의 passwd/group를 합성 호스트 마커 파일의 symlink로 바꾼 뒤, 다음 client namespace에도 호스트 마커가 노출되지 않는지 확인합니다. 실제 비밀 파일이나 운영 데이터는 사용하지 않습니다.
+
+## 원격 백업과 연결
+
+v0.6.0의 [복구 묶음 CLI](FEATURE_RECOVERY_BUNDLE_CLI.md)는 현재 정상 판정을 확인한 원격 백업을 새 경로로 받고, 함께 보관한 계획의 백업 경로만 변경해 같은 감독·고정 DB 검사를 실행합니다. 원본 에이전트 DB는 사용하지 않으며 결과 일관성 검사와 최종 원격 판정 재조회까지 수행합니다. 서버의 완료·검토 서명과 별개로 로컬 시험 보고서는 무서명입니다.
