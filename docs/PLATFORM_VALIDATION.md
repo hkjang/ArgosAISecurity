@@ -46,6 +46,18 @@ python3 scripts/bundle-operations-scenarios.py --bin-dir target/release --pg-roo
 
 이번 시험은 한 호스트의 임시 경로·loopback TLS와 별도 namespace에서 수행했다. 실제 에이전트·보관·복구 서버 **3대 분리**, 운영 TLS 프록시/인증서 배포, 물리 네트워크·디스크 장애·운영 DB 성능·전체 서비스 RPO/RTO는 미검증이다. 보관 서버의 키 교체·재해복구·주기적 실물 검사와 개인별 검토 권한은 후속이다.
 
+## v0.7.0 배포 산출물 확인
+
+태그와 `BUILD_INFO.json`의 소스 커밋은 `a82b393db6e0cbd207929934ef7773b97ea38159`이다. 게시한 압축 파일을 다시 내려받아 `SHA256SUMS`, 네 실행 파일의 해시·크기·도움말, CLI 버전, 새 queue jobs/show-bundle 및 test --preapproval 도움말과 문서·시나리오 포함을 확인했다. 한국어·영어 사이트와 JavaScript의 v0.7.0 및 승인 전 시험 안내도 실제 게시를 확인했다.
+
+`argos-v0.7.0-linux-x86_64-gnu.tar.gz`의 SHA-256:
+
+```text
+c2ad794604581cd1aa65934c9575444d3cfef09030fd0c872e156656bd61224b
+```
+
+패키지는 GNU/Linux x86_64·glibc 2.39 이상용이다. 배포 후 검증 기록 갱신은 태그·첨부 파일을 변경하지 않는다. 이 대조는 모든 바이너리의 소스 커밋 내장 검증이나 서명 빌드 증명을 대신하지 않는다.
+
 ## v0.6.0 분할 보관·원본 로컬 자료 없는 복구
 
 - 워크스페이스 **248개 통과**, 실패 0개. 기본 실행에서 제외한 PostgreSQL 18.6 네이티브 복원 시험 **1개도 별도 통과**했다. Linux x86_64·Rust 1.93.1 최적화 빌드가 완료되었다.
