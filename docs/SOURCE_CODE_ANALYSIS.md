@@ -1,6 +1,6 @@
 # Argos AI Security 소스 코드 안내
 
-기준: **v0.4.0, 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
+기준: **v0.5.0, 2026-09-27**. 현재 함수와 데이터 흐름을 따라 읽는 개발자용 안내다. 설계 전체는 [아키텍처](ARCHITECTURE.md), 요구·미구현 항목은 [요건서](REQUIREMENTS.md), 실행 검증은 [검증 기록](PLATFORM_VALIDATION.md)을 참고한다. 이 문서의 코드 대조를 새로운 실행 시험이나 운영 성능 측정으로 해석하지 않는다.
 
 ## 워크스페이스 입구
 
@@ -170,3 +170,7 @@ CLI의 `Command`·`PolicyAction`·`RetentionAction`은 명령 정의의 기준�
 | `argos-vault/src/quota.rs`, `quota_tests.rs` | Linux 작성자 잠금, 시작 스캔, 논리 계수·디스크 여유·요청 승인 |
 | `argos-recovery/src/service/verification.rs` | 정규화 계획·기대값 해시, 안정 파일 읽기, v2 검사·시각·백업 대조 |
 | `scripts/durability-scenarios.py` | 실제 CLI의 오프라인 큐·재시작·한도·복구 보고서 재검증 |
+
+## v0.5.0 큐 운영 경로
+
+`argos-vault/src/queue.rs`와 하위 모듈은 schema v2 이전·완료 이력·임대·내보내기를 담당한다. `client.rs`는 HTTP/연결/무결성 오류를 민감 본문 없이 분류한다. `packaging/argos-vault-upload.{service,timer}`는 별도 계정의 제한된 drain 호출을 예약한다. 실제 동시 등록·이력 검증은 `scripts/queue-operations-scenarios.py`를 참고한다.

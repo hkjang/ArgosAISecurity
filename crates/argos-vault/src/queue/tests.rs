@@ -276,7 +276,7 @@ fn corrupt_snapshot_is_not_uploaded_and_status_does_not_mutate_queue() {
         status(&fixture.queue()).unwrap().items[0]
             .last_error
             .as_deref(),
-        Some("snapshot_upload_or_receipt_validation_failed")
+        Some("queue_local")
     );
     assert_eq!(
         listener.accept().unwrap_err().kind(),
@@ -285,7 +285,7 @@ fn corrupt_snapshot_is_not_uploaded_and_status_does_not_mutate_queue() {
 }
 
 #[test]
-fn quotas_and_duplicate_enqueue_are_persistent_and_done_rows_count() {
+fn quotas_count_only_active_rows_and_dedup_includes_archive() {
     let fixture = Fixture::new();
     let config = fixture.config("http://127.0.0.1:1");
     let limits = QueueLimits {
@@ -319,24 +319,42 @@ fn quotas_and_duplicate_enqueue_are_persistent_and_done_rows_count() {
         &limits
     )
     .is_err());
-    let ack = receipt(b"original snapshot", &fixture.key);
-    let conn = Connection::open(fixture.queue().join(DB)).unwrap();
-    conn.execute(
-        "UPDATE queue_items SET state='sent',receipt_json=?1,sent_at_ms=1001,next_retry_ms=0",
-        [serde_json::to_string(&ack).unwrap()],
+    let target = QueueTarget::from_config(&config).unwrap();
+    let lease = claim(&fixture.queue(), &target, 30, crate::now_ms())
+        .unwrap()
+        .unwrap();
+    finish(
+        &fixture.queue(),
+        &target,
+        &lease,
+        &Ok(receipt(b"original snapshot", &fixture.key)),
+        crate::now_ms(),
     )
     .unwrap();
-    drop(conn);
-    assert!(enqueue(
+    let next = enqueue(
         &fixture.queue(),
         &config,
         &fixture.source,
         "evidence",
-        &limits
+        &limits,
     )
-    .is_err());
+    .unwrap();
+    assert_ne!(next.id, first.id);
     assert!(!snapshot(&fixture.queue(), &first.id).unwrap().exists());
     assert_eq!(status(&fixture.queue()).unwrap().sent_items, 1);
+    fs::write(&fixture.source, b"original snapshot").unwrap();
+    assert_eq!(
+        enqueue(
+            &fixture.queue(),
+            &config,
+            &fixture.source,
+            "evidence",
+            &limits
+        )
+        .unwrap()
+        .id,
+        first.id
+    );
     let other = fixture.dir.join("byte-queue");
     fs::write(&fixture.source, b"too big").unwrap();
     assert!(enqueue(
@@ -664,19 +682,26 @@ fn old_completed_receipt_can_be_read_beyond_status_page_without_mutation() {
         .find(|(entry, _)| !summary.items.iter().any(|current| current.id == entry.id))
         .unwrap();
     let ack = receipt(bytes, &fixture.key);
-    Connection::open(fixture.queue().join(DB))
+    let target = QueueTarget::from_config(&config).unwrap();
+    // 가장 오래된 항목이 첫 임대 대상이다.
+    let lease = claim(&fixture.queue(), &target, 30, crate::now_ms())
         .unwrap()
-        .execute(
-            "UPDATE queue_items SET state='sent',receipt_json=?1,sent_at_ms=1001 WHERE id=?2",
-            params![serde_json::to_string(&ack).unwrap(), older.id],
-        )
         .unwrap();
+    assert_eq!(lease.item.id, older.id);
+    finish(
+        &fixture.queue(),
+        &target,
+        &lease,
+        &Ok(ack.clone()),
+        crate::now_ms(),
+    )
+    .unwrap();
     let before = fs::read(fixture.queue().join(DB)).unwrap();
     let loaded = item(&fixture.queue(), &older.id).unwrap();
     assert_eq!(loaded.receipt, Some(ack));
     assert_eq!(loaded.sha256, older.sha256);
     assert_eq!(before, fs::read(fixture.queue().join(DB)).unwrap());
-    assert!(snapshot(&fixture.queue(), &older.id).unwrap().exists()); // readonly item does not clean up
+    assert!(!snapshot(&fixture.queue(), &older.id).unwrap().exists()); // archived payload already cleaned
     assert!(item(&fixture.queue(), "../queue.sqlite3").is_err());
 }
 
@@ -717,4 +742,442 @@ fn each_drain_respects_its_batch_and_no_network_for_remaining_not_selected() {
     let seen = server.join().unwrap();
     assert_eq!(seen.len(), 2);
     assert_ne!(seen[0], seen[1]);
+}
+
+#[test]
+fn lease_expiry_reclaim_and_late_ack_cannot_complete_another_workers_item() {
+    let fixture = Fixture::new();
+    let config = fixture.config("http://127.0.0.1:1");
+    let entry = enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    let target = QueueTarget::from_config(&config).unwrap();
+    let now = crate::now_ms();
+    let first = claim(&fixture.queue(), &target, 1, now).unwrap().unwrap();
+    assert!(claim(&fixture.queue(), &target, 1, now + 1000)
+        .unwrap()
+        .is_none());
+    let expires: u64 = Connection::open(fixture.queue().join(DB))
+        .unwrap()
+        .query_row(
+            "SELECT lease_expires_ms FROM queue_items WHERE id=?1",
+            [&entry.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let second = claim(&fixture.queue(), &target, 1, expires + 1)
+        .unwrap()
+        .unwrap();
+    assert_ne!(first.token, second.token);
+    assert!(!finish(
+        &fixture.queue(),
+        &target,
+        &first,
+        &Ok(receipt(b"original snapshot", &fixture.key)),
+        expires + 2
+    )
+    .unwrap());
+    assert!(snapshot(&fixture.queue(), &entry.id).unwrap().exists());
+    assert_eq!(status(&fixture.queue()).unwrap().archive_items, 0);
+    assert!(finish(
+        &fixture.queue(),
+        &target,
+        &second,
+        &Ok(receipt(b"original snapshot", &fixture.key)),
+        expires + 3
+    )
+    .unwrap());
+    assert_eq!(status(&fixture.queue()).unwrap().archive_items, 1);
+    assert!(!snapshot(&fixture.queue(), &entry.id).unwrap().exists());
+}
+
+#[test]
+fn worker_process_exit_leaves_reclaimable_lease() {
+    if let Some(dir) = std::env::var_os("ARGOS_QUEUE_LEASE_TEST_DIR") {
+        let directory = Path::new(&dir);
+        let conn = open_readonly(directory).unwrap();
+        let target = metadata(&conn).unwrap().unwrap().0;
+        drop(conn);
+        claim(directory, &target, 1, crate::now_ms())
+            .unwrap()
+            .unwrap();
+        return;
+    }
+    let fixture = Fixture::new();
+    let config = fixture.config("http://127.0.0.1:1");
+    enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "queue::tests::worker_process_exit_leaves_reclaimable_lease",
+        ])
+        .env("ARGOS_QUEUE_LEASE_TEST_DIR", fixture.queue())
+        .output()
+        .unwrap();
+    assert!(
+        child.status.success(),
+        "{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    assert_eq!(status(&fixture.queue()).unwrap().leased_items, 1);
+    let target = QueueTarget::from_config(&config).unwrap();
+    assert!(claim(&fixture.queue(), &target, 1, crate::now_ms())
+        .unwrap()
+        .is_none());
+    let reclaimed = claim(&fixture.queue(), &target, 1, crate::now_ms() + 32_000)
+        .unwrap()
+        .unwrap();
+    assert_eq!(reclaimed.item.attempts, 2);
+}
+
+#[test]
+fn network_wait_allows_cross_process_enqueue_and_other_workers_skip_lease() {
+    if let Some(dir) = std::env::var_os("ARGOS_QUEUE_ENQUEUE_TEST_DIR") {
+        let config: VaultConfig =
+            serde_json::from_str(&std::env::var("ARGOS_QUEUE_ENQUEUE_TEST_CONFIG").unwrap())
+                .unwrap();
+        enqueue(
+            Path::new(&dir),
+            &config,
+            Path::new(&std::env::var_os("ARGOS_QUEUE_ENQUEUE_TEST_SOURCE").unwrap()),
+            "evidence",
+            &QueueLimits::default(),
+        )
+        .unwrap();
+        return;
+    }
+    let fixture = Fixture::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let config = fixture.config(&format!("http://{}", listener.local_addr().unwrap()));
+    enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    let (waiting, started) = std::sync::mpsc::channel();
+    let (resume, go) = std::sync::mpsc::channel();
+    let key = fixture.key.clone();
+    let server = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let (_, bytes) = request(&mut socket);
+        waiting.send(()).unwrap();
+        go.recv().unwrap();
+        respond(&mut socket, &receipt(&bytes, &key));
+    });
+    let directory = fixture.queue();
+    let worker_config = config.clone();
+    let worker = thread::spawn(move || {
+        drain_once(&directory, &worker_config, &DrainOptions { max_items: 1 }).unwrap()
+    });
+    started.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        drain_once(&fixture.queue(), &config, &DrainOptions { max_items: 1 })
+            .unwrap()
+            .attempted,
+        0
+    );
+    fs::write(&fixture.source, b"registered during blocked HTTP").unwrap();
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "queue::tests::network_wait_allows_cross_process_enqueue_and_other_workers_skip_lease",
+        ])
+        .env("ARGOS_QUEUE_ENQUEUE_TEST_DIR", fixture.queue())
+        .env("ARGOS_QUEUE_ENQUEUE_TEST_SOURCE", &fixture.source)
+        .env(
+            "ARGOS_QUEUE_ENQUEUE_TEST_CONFIG",
+            serde_json::to_string(&config).unwrap(),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        child.status.success(),
+        "{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    assert_eq!(status(&fixture.queue()).unwrap().pending_items, 2);
+    resume.send(()).unwrap();
+    assert_eq!(worker.join().unwrap().sent, 1);
+    server.join().unwrap();
+}
+
+fn downgrade_v1(directory: &Path, sent: &QueueItem, ack: &SignedReceipt) {
+    let conn = Connection::open(directory.join(DB)).unwrap();
+    conn.execute_batch("DROP TABLE receipt_archive; ALTER TABLE queue_items DROP COLUMN lease_token; ALTER TABLE queue_items DROP COLUMN lease_expires_ms; PRAGMA user_version=1;").unwrap();
+    conn.execute("UPDATE queue_items SET state='sent',receipt_json=?1,sent_at_ms=1001,next_retry_ms=0 WHERE id=?2",params![serde_json::to_string(ack).unwrap(),sent.id]).unwrap();
+}
+#[test]
+fn v1_migration_preserves_receipts_pending_snapshots_and_dedup() {
+    let fixture = Fixture::new();
+    let config = fixture.config("http://127.0.0.1:1");
+    let sent = enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    fs::write(&fixture.source, b"pending version").unwrap();
+    let pending = enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    downgrade_v1(
+        &fixture.queue(),
+        &sent,
+        &receipt(b"original snapshot", &fixture.key),
+    );
+    let before = fs::read(fixture.queue().join(DB)).unwrap();
+    assert_eq!(status(&fixture.queue()).unwrap().sent_items, 1);
+    assert_eq!(fs::read(fixture.queue().join(DB)).unwrap(), before);
+    assert_eq!(
+        enqueue(
+            &fixture.queue(),
+            &config,
+            &fixture.source,
+            "evidence",
+            &QueueLimits::default()
+        )
+        .unwrap()
+        .id,
+        pending.id
+    );
+    assert!(snapshot(&fixture.queue(), &pending.id).unwrap().exists());
+    assert!(!snapshot(&fixture.queue(), &sent.id).unwrap().exists());
+    assert_eq!(item(&fixture.queue(), &sent.id).unwrap().state, "sent");
+    let conn = Connection::open(fixture.queue().join(DB)).unwrap();
+    let version: u32 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 2);
+    fs::write(&fixture.source, b"original snapshot").unwrap();
+    assert_eq!(
+        enqueue(
+            &fixture.queue(),
+            &config,
+            &fixture.source,
+            "evidence",
+            &QueueLimits::default()
+        )
+        .unwrap()
+        .id,
+        sent.id
+    );
+}
+#[test]
+fn corrupt_v1_receipt_refuses_migration_without_erasing_snapshots_or_db() {
+    let fixture = Fixture::new();
+    let config = fixture.config("http://127.0.0.1:1");
+    let entry = enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    downgrade_v1(
+        &fixture.queue(),
+        &entry,
+        &receipt(b"original snapshot", &SigningKey::from_bytes(&[9; 32])),
+    );
+    let before = fs::read(fixture.queue().join(DB)).unwrap();
+    assert!(enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default()
+    )
+    .is_err());
+    assert_eq!(fs::read(fixture.queue().join(DB)).unwrap(), before);
+    assert!(snapshot(&fixture.queue(), &entry.id).unwrap().exists());
+}
+#[test]
+fn archive_export_is_non_destructive_independently_verified_and_rejects_truncation() {
+    let fixture = Fixture::new();
+    let config = fixture.config("http://127.0.0.1:1");
+    let entry = enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    let target = QueueTarget::from_config(&config).unwrap();
+    let lease = claim(&fixture.queue(), &target, 1, crate::now_ms())
+        .unwrap()
+        .unwrap();
+    finish(
+        &fixture.queue(),
+        &target,
+        &lease,
+        &Ok(receipt(b"original snapshot", &fixture.key)),
+        crate::now_ms(),
+    )
+    .unwrap();
+    let before = fs::read(fixture.queue().join(DB)).unwrap();
+    let output = fixture.dir.join("archive.jsonl");
+    let exported = export_archive(&fixture.queue(), &output).unwrap();
+    assert_eq!(exported.archived_items, 1);
+    assert_eq!(
+        verify_archive(&output, &config.pinned_pubkey)
+            .unwrap()
+            .sha256,
+        exported.sha256
+    );
+    assert!(
+        !verify_archive(&output, &config.pinned_pubkey)
+            .unwrap()
+            .archive_authenticated
+    );
+    assert_eq!(fs::read(fixture.queue().join(DB)).unwrap(), before);
+    assert_eq!(item(&fixture.queue(), &entry.id).unwrap().state, "sent");
+    assert!(export_archive(&fixture.queue(), &output).is_err());
+    assert!(verify_archive(
+        &output,
+        &hex::encode(SigningKey::from_bytes(&[8; 32]).verifying_key().to_bytes())
+    )
+    .is_err());
+    let original = fs::read(&output).unwrap();
+    let truncated = original
+        .split_inclusive(|b| *b == b'\n')
+        .take(2)
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+    fs::write(&output, truncated).unwrap();
+    assert!(verify_archive(&output, &config.pinned_pubkey).is_err());
+    fs::write(&output, [original, b"{}\n".to_vec()].concat()).unwrap();
+    assert!(verify_archive(&output, &config.pinned_pubkey).is_err());
+}
+
+#[test]
+fn over_one_thousand_deliveries_reuse_active_slots_and_keep_old_dedup() {
+    let fixture = Fixture::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let config = fixture.config(&format!("http://{}", listener.local_addr().unwrap()));
+    let key = fixture.key.clone();
+    let server = thread::spawn(move || {
+        for _ in 0..1001 {
+            let (mut socket, _) = listener.accept().unwrap();
+            let (_, bytes) = request(&mut socket);
+            respond(&mut socket, &receipt(&bytes, &key));
+        }
+    });
+    let limits = QueueLimits {
+        max_items: 20,
+        max_bytes: 1024,
+    };
+    let mut first = String::new();
+    for offset in (0..1001).step_by(20) {
+        for index in offset..(offset + 20).min(1001) {
+            fs::write(&fixture.source, format!("long-running-{index}")).unwrap();
+            let entry = enqueue(
+                &fixture.queue(),
+                &config,
+                &fixture.source,
+                "evidence",
+                &limits,
+            )
+            .unwrap();
+            if index == 0 {
+                first = entry.id;
+            }
+        }
+        let report =
+            drain_once(&fixture.queue(), &config, &DrainOptions { max_items: 20 }).unwrap();
+        assert_eq!(report.failed, 0);
+        assert_eq!(report.remaining_pending, 0);
+    }
+    server.join().unwrap();
+    let summary = status(&fixture.queue()).unwrap();
+    assert_eq!(summary.archive_items, 1001);
+    assert_eq!(summary.pending_items, 0);
+    assert_eq!(summary.limits.unwrap().max_items, 20);
+    fs::write(&fixture.source, b"long-running-0").unwrap();
+    assert_eq!(
+        enqueue(
+            &fixture.queue(),
+            &config,
+            &fixture.source,
+            "evidence",
+            &limits
+        )
+        .unwrap()
+        .id,
+        first
+    );
+    assert!(item(&fixture.queue(), &first).unwrap().receipt.is_some());
+}
+
+#[test]
+fn corrupt_archived_ack_preserves_leftover_payload_on_next_mutation() {
+    let fixture = Fixture::new();
+    let config = fixture.config("http://127.0.0.1:1");
+    let entry = enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default(),
+    )
+    .unwrap();
+    let target = QueueTarget::from_config(&config).unwrap();
+    let lease = claim(&fixture.queue(), &target, 1, crate::now_ms())
+        .unwrap()
+        .unwrap();
+    finish(
+        &fixture.queue(),
+        &target,
+        &lease,
+        &Ok(receipt(b"original snapshot", &fixture.key)),
+        crate::now_ms(),
+    )
+    .unwrap();
+    let payload = snapshot(&fixture.queue(), &entry.id).unwrap();
+    write_new(&payload, b"original snapshot").unwrap();
+    let forged = receipt(b"original snapshot", &SigningKey::from_bytes(&[9; 32]));
+    Connection::open(fixture.queue().join(DB))
+        .unwrap()
+        .execute(
+            "UPDATE receipt_archive SET receipt_json=?1",
+            [serde_json::to_string(&forged).unwrap()],
+        )
+        .unwrap();
+    let before = fs::read(fixture.queue().join(DB)).unwrap();
+    assert!(enqueue(
+        &fixture.queue(),
+        &config,
+        &fixture.source,
+        "evidence",
+        &QueueLimits::default()
+    )
+    .is_err());
+    assert!(item(&fixture.queue(), &entry.id).is_err());
+    assert!(export_archive(&fixture.queue(), &fixture.dir.join("forged.jsonl")).is_err());
+    assert!(!fixture.dir.join("forged.jsonl").exists());
+    assert_eq!(fs::read(payload).unwrap(), b"original snapshot");
+    assert_eq!(fs::read(fixture.queue().join(DB)).unwrap(), before);
 }

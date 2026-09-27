@@ -15,16 +15,18 @@
 
 <hr />
 
-## 현재 릴리즈: v0.4.0
+## 현재 릴리즈: v0.5.0
 
-[v0.4.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.4.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.4.0.md)
+[v0.5.0 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.5.0) · [Linux 바이너리 설치](docs/INSTALL_BINARY.md) · [변경 및 업그레이드 안내](docs/releases/v0.5.0.md)
 
-2026-09-27 기준, **통신 단절 후 이어 보내는 보관 대기열, 서버·에이전트별 보관 용량 보호, 현재 계획·백업에 대한 복구 시험 보고서 재검증**을 추가했습니다. 보호 경로 공백 검사·정책 예외 감사·AI 인용 검사는 계속 제공합니다. 자동 차단은 기본 비활성입니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
+2026-09-27 기준, **활성 큐와 완료 수신증명 이력 분리, 전송 중 신규 등록과 작업 임대, systemd 예약 전송 및 오류 유형 구분**을 추가했습니다. 보호 경로 공백 검사·정책 예외 감사·AI 인용 검사는 계속 제공합니다. 자동 차단은 기본 비활성입니다. 배포 바이너리는 Linux x86_64·glibc 2.39 이상용입니다.
 
-워크스페이스 테스트 **220개**와 별도 PostgreSQL 복원 시험이 통과했습니다. 실제 CLI·에이전트 시나리오의 결과·환경·미검증 범위는 [검증 기록](docs/PLATFORM_VALIDATION.md)에 정리합니다. PostgreSQL 드릴에는 별도 PostgreSQL 설치와 Linux bubblewrap이 필요합니다.
+워크스페이스 테스트 235개가 통과했습니다. 실제 CLI·에이전트 시나리오의 결과·환경·미검증 범위는 [검증 기록](docs/PLATFORM_VALIDATION.md)에 정리합니다. PostgreSQL 드릴에는 별도 PostgreSQL 설치와 Linux bubblewrap이 필요합니다.
 
 | 추가 기능 | 시작 명령·안내 |
 | --- | --- |
+| 예약 전송·오류 확인 | `argos-vault-upload.timer`, `vault queue status` — [운영 안내](docs/FEATURE_VAULT_SCHEDULER.md) |
+| 완료 수신증명 내보내기 | `vault queue export-archive`, `vault queue verify-archive` — [이력·서명 확인](docs/FEATURE_VAULT_QUEUE.md) |
 | 보관 전송 대기열 | `vault queue enqueue`, `vault queue drain`, `vault queue status` — [재시도·고정 바이트](docs/FEATURE_VAULT_QUEUE.md) |
 | 보관 용량 보호 | `vault usage` — [전체·에이전트 한도와 디스크 여유](docs/FEATURE_VAULT_CAPACITY.md) |
 | 복구 보고서 재검증 | `service-recovery verify --plan PLAN --report REPORT --max-age-secs 86400` — [계획·백업·시간 확인](docs/FEATURE_SERVICE_RECOVERY.md) |
@@ -199,7 +201,7 @@ argos mcp # 설정한 단일 호스트 DB를 조회하는 stdio MCP 서버
 
 | 목적 | 문서 |
 | --- | --- |
-| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.4.0 변경 사항](docs/releases/v0.4.0.md) |
+| 처음 설치·업그레이드 | [바이너리 설치](docs/INSTALL_BINARY.md), [v0.5.0 변경 사항](docs/releases/v0.5.0.md) |
 | 일상 운영·사고 조사 | [운영자](docs/ROLE_OPERATOR.md), [분석가](docs/ROLE_ANALYST.md), [관리자](docs/ROLE_ADMINISTRATOR.md) |
 | 명령·서비스 설정 | [CLI](docs/SERVICE_CLI.md), [에이전트](docs/SERVICE_AGENT.md), [중앙 서버](docs/SERVICE_CENTRAL.md) |
 | 구현과 후속 요구 | [아키텍처](docs/ARCHITECTURE.md), [코드 분석](docs/SOURCE_CODE_ANALYSIS.md), [요건서](docs/REQUIREMENTS.md), [로드맵](docs/ROADMAP.md) |

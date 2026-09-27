@@ -1,6 +1,6 @@
 # Argos CLI 명령 가이드
 
-`argos`는 v0.4.0의 로컬 조사·복구·정책 관리 도구다. 에이전트와 같은 설정을 지정한다.
+`argos`는 v0.5.0의 로컬 조사·복구·정책 관리 도구다. 에이전트와 같은 설정을 지정한다.
 명령은 해당 DB·백업에 필요한 OS 권한이 있는 계정으로 실행한다. 중앙 관리자 토큰이
 로컬 CLI 권한을 부여하지는 않는다. 명령별 옵션은 `argos <명령> --help`, 정책·보존 작업은 `argos policy --help`와
 `argos retention --help`에서 확인한다.
@@ -141,6 +141,8 @@ sudo argos isolate --release
 | `vault queue enqueue-evidence --package DIR --directory QUEUE --vault-config CONFIG` | 검증한 증거 패키지 세 파일을 각각 등록. 부분 등록·전송 상태 확인 필요 |
 | `vault queue drain --directory DIR --vault-config CONFIG [--max-items 16]` | 재시도 시각에 도달한 항목을 전송하고 종료. 실패가 있으면 비영 종료 |
 | `vault queue status --directory DIR` | 네트워크·큐 변경 없이 전체 계수와 최근 100개 상태 조회 |
+| `vault queue export-archive --directory DIR --out NEW_FILE` | 완료 수신증명을 검증하고 새 JSONL에 내보냄. 원본 이력 유지 |
+| `vault queue verify-archive --file FILE --pubkey HEX` | 큐 DB 없이 구조·해시와 개별 수신증명 서명 확인. 전체 목록의 출처 인증은 아님 |
 | `vault queue show --directory DIR --id ID` | 특정 항목의 수신증명·재시도 상태 조회 |
 | `vault keygen --out KEY_FILE` | 전용 0700 디렉터리에 보관 서버 서명키 생성, 공개키 출력 |
 | `vault upload --vault-config CONFIG --file FILE --kind audit --receipt NEW_FILE` | evidence/backup/audit 파일을 보관하고 검증한 수신증명 저장 |
@@ -149,6 +151,6 @@ sudo argos isolate --release
 | `vault fetch --vault-config CONFIG --agent-id ID --sha256 HASH --out NEW_FILE --receipt NEW_FILE` | 관리자 토큰으로 내려받아 서명·크기·해시를 검증하고 새 파일로 저장 |
 | `vault verify --file FILE --receipt RECEIPT --pubkey HEX` | 원격 호출 없이 고정 공개키와 로컬 파일로 수신증명 검사 |
 
-보관 설정은 별도 TOML이며 Linux에서 현재 계정 소유·0600 권한을 요구한다. DB 복구 시험과 원격 보관은 명시적인 CLI 작업이며 자동 예약·동기화는 제공하지 않는다. `service-recovery`, 보관 키 생성/업로드/검증/받기는 관련 없는 에이전트 설정을 읽지 않는다. `vault upload-backup`과 `vault queue enqueue-backup`은 로컬 백업 설정을 읽는다. 대기열은 명시적 `drain` 호출로 처리하며 자동 스케줄러는 제공하지 않는다.
+보관 설정은 별도 TOML이며 Linux에서 현재 계정 소유·0600 권한을 요구한다. DB 복구 시험·파일 등록은 명시적인 CLI 작업이다. `service-recovery`, 보관 키 생성/업로드/검증/받기는 관련 없는 에이전트 설정을 읽지 않는다. `vault upload-backup`과 `vault queue enqueue-backup`은 로컬 백업 설정을 읽는다. 대기열은 `drain` 호출로 처리한다. 선택한 [systemd timer](FEATURE_VAULT_SCHEDULER.md)로 예약 전송할 수 있다.
 
 [보호 공백](FEATURE_COVERAGE.md), [DB 복구](FEATURE_SERVICE_RECOVERY.md), [원격 보관](FEATURE_REMOTE_VAULT.md), [영속 전송](FEATURE_VAULT_QUEUE.md), [용량 보호](FEATURE_VAULT_CAPACITY.md), [예외 감사](FEATURE_EXCEPTION_AUDIT.md), [AI 인용 검사](FEATURE_AI_VALIDATION.md)의 전제와 결과 해석을 따른다. `ask`·`explain`은 잘못된 인용이나 JSON 형식을 오류로 처리하며 검증되지 않은 모델 원문을 대신 출력하지 않는다.

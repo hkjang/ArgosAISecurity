@@ -1,4 +1,4 @@
-/** v0.4.0 landing page copy and illustrative CLI workflows. No backend calls. */
+/** v0.5.0 landing page copy and illustrative CLI workflows. No backend calls. */
 const i18n = {
   "ko": {
     "nav_features": "핵심 기능",
@@ -6,12 +6,12 @@ const i18n = {
     "nav_architecture": "아키텍처",
     "nav_recovery": "복구 메커니즘",
     "nav_faq": "자주 묻는 질문",
-    "hero_badge": "v0.4.0 · Linux 보안 플랫폼",
+    "hero_badge": "v0.5.0 · Linux 보안 플랫폼",
     "hero_title": "차단과 복구를 검증하는 Linux 보안<br><span class=\"text-gradient\">Argos AI Security</span>",
-    "hero_subtitle": "통신이 끊겨도 등록한 파일을 이어 보내고, 보관 한도와 디스크 여유를 확인합니다. 복구 시험 결과가 현재 계획·백업에도 유효한지 다시 검증합니다.",
+    "hero_subtitle": "완료 수신증명과 전송 대기를 분리하고, 느린 전송 중에도 새 자료를 등록합니다. 작업 임대·예약 전송·오류 유형과 이력 내보내기로 보관 운영을 지원합니다.",
     "btn_quickstart": "빠른 시작 가이드",
     "btn_demo": "CLI 데모 체험",
-    "metric_time": "v0.4.0",
+    "metric_time": "v0.5.0",
     "metric_time_label": "공개 릴리즈",
     "metric_recovery": "SHA-256",
     "metric_recovery_label": "복구 객체 무결성 검증",
@@ -58,12 +58,12 @@ const i18n = {
     "faq3_q": "Q3. AI에 어떤 데이터가 전달되나요?",
     "faq3_a": "설정한 제공자에 저장된 이벤트·탐지·프로세스·대응 근거를 전달합니다. 파일 본문을 직접 보내지는 않지만 경로·명령행·계정 정보에도 민감한 값이 있을 수 있습니다. Anthropic은 외부 API이며, Ollama는 지정한 사내 주소로 구성할 수 있습니다. 모델 ID와 조회 범위를 확인하세요.",
     "faq4_q": "Q4. 어떤 환경에서 사용할 수 있나요?",
-    "faq4_a": "v0.4.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다.",
+    "faq4_a": "v0.5.0 배포 바이너리는 GNU/Linux x86_64, glibc 2.39 이상용입니다. 소스 빌드 최소 Rust 버전은 1.86입니다. notify는 다른 OS 개발용 경로도 제공하지만 이번 릴리즈에서 Windows/macOS 바이너리와 실행 검증 결과는 제공하지 않습니다. fanotify·프로세스 대응·격리는 Linux 지원과 권한이 필요합니다.",
     "footer_tagline": "차단·정상본 복구·사건 근거를 검증하는 Linux 보안 플랫폼",
     "footer_quick_inquiry": "문의 요청:",
     "footer_rights": "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0.",
     "nav_docs": "문서",
-    "btn_download": "v0.4.0 다운로드"
+    "btn_download": "v0.5.0 다운로드"
   },
   "en": {
     "nav_features": "Features",
@@ -71,12 +71,12 @@ const i18n = {
     "nav_architecture": "Architecture",
     "nav_recovery": "Recovery",
     "nav_faq": "FAQ",
-    "hero_badge": "v0.4.0 · Linux security platform",
+    "hero_badge": "v0.5.0 · Linux security platform",
     "hero_title": "Linux security with verifiable response and recovery<br><span class=\"text-gradient\">Argos AI Security</span>",
-    "hero_subtitle": "Resume queued files after connection failures and check storage limits and free space. Revalidate recovery drill results against the current plan and backup.",
+    "hero_subtitle": "Separate completed receipts from pending uploads and register new files while delivery is slow. Operate retention with item leases, scheduled delivery, classified failures and receipt exports.",
     "btn_quickstart": "Quick Start Guide",
     "btn_demo": "Interactive CLI Demo",
-    "metric_time": "v0.4.0",
+    "metric_time": "v0.5.0",
     "metric_time_label": "Published release",
     "metric_recovery": "SHA-256",
     "metric_recovery_label": "Recovery object integrity",
@@ -123,12 +123,12 @@ const i18n = {
     "faq3_q": "Q3. Which data is sent to the AI provider?",
     "faq3_a": "Stored file, detection, process and response evidence goes to the configured provider. File bodies are not sent directly, but paths, command lines and account information can still contain sensitive values. Anthropic uses an external API; Ollama can use your on-premises endpoint. Configure the model ID and review the query scope.",
     "faq4_q": "Q4. Which environments are supported?",
-    "faq4_a": "The v0.4.0 binaries target GNU/Linux x86_64 with glibc 2.39 or later. Source builds require Rust 1.86 or later. notify also provides a development path for other operating systems, but this release supplies no Windows/macOS binaries or execution validation. fanotify, process response and isolation need Linux support and permissions.",
+    "faq4_a": "The v0.5.0 binaries target GNU/Linux x86_64 with glibc 2.39 or later. Source builds require Rust 1.86 or later. notify also provides a development path for other operating systems, but this release supplies no Windows/macOS binaries or execution validation. fanotify, process response and isolation need Linux support and permissions.",
     "footer_tagline": "A Linux platform for verifiable response, reviewed recovery and incident evidence",
     "footer_quick_inquiry": "Inquiry:",
     "footer_rights": "© 2026 Argos AI Security. All rights reserved. Licensed under AGPL-3.0.",
     "nav_docs": "Docs",
-    "btn_download": "Download v0.4.0"
+    "btn_download": "Download v0.5.0"
   }
 };
 

@@ -101,7 +101,7 @@ struct EnqueueOptions {
     /// 현재 계정 소유 전용 0700 큐 절대 경로 (처음 등록 시 생성)
     #[arg(long)]
     directory: PathBuf,
-    /// 완료 이력도 포함한 최대 항목 수
+    /// 전송 대기·임대 중인 활성 항목 수 상한
     #[arg(long, default_value_t = 1000)]
     max_items: u64,
     /// 미전송 파일 스냅샷의 총 바이트 상한
@@ -118,6 +118,20 @@ impl EnqueueOptions {
 }
 #[derive(Subcommand)]
 enum QueueAction {
+    /// 완료 수신증명을 새 파일에 검증 가능한 JSONL로 내보내기 (원본 이력 유지)
+    ExportArchive {
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// 큐 DB 없이 완료 이력의 구조·개별 수신증명 서명 확인
+    VerifyArchive {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        pubkey: String,
+    },
     /// 파일을 같은 바이트의 로컬 스냅샷으로 대기열에 등록 (전송하지 않음)
     Enqueue {
         #[command(flatten)]
@@ -164,6 +178,20 @@ enum QueueAction {
 }
 
 fn run_queue(action: QueueAction, config_path: Option<PathBuf>, agent_config: &Path) -> Result<()> {
+    if let QueueAction::ExportArchive { directory, out } = &action {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&convert(queue::export_archive(directory, out))?)?
+        );
+        return Ok(());
+    }
+    if let QueueAction::VerifyArchive { file, pubkey } = &action {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&convert(queue::verify_archive(file, pubkey))?)?
+        );
+        return Ok(());
+    }
     if let QueueAction::Show { directory, id } = &action {
         let item = convert(queue::item(directory, id))?;
         println!("{}", serde_json::to_string_pretty(&item)?);
@@ -261,7 +289,10 @@ fn run_queue(action: QueueAction, config_path: Option<PathBuf>, agent_config: &P
                 );
             }
         }
-        QueueAction::Status { .. } | QueueAction::Show { .. } => unreachable!(),
+        QueueAction::Status { .. }
+        | QueueAction::Show { .. }
+        | QueueAction::ExportArchive { .. }
+        | QueueAction::VerifyArchive { .. } => unreachable!(),
     }
     Ok(())
 }

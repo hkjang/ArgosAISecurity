@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically drain the Argos vault upload queue
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=5s
+RandomizedDelaySec=10s
+Unit=argos-vault-upload.service
+
+[Install]
+WantedBy=timers.target

@@ -1,17 +1,17 @@
 # Linux 바이너리 설치
 
-v0.4.0 패키지는 x86_64 Linux와 **glibc 2.39 이상**을 요구한다. `libgcc_s.so.1`, `libm.so.6`, `libc.so.6`, `/lib64/ld-linux-x86-64.so.2`가 필요하다. 배포판의 glibc가 더 오래되었거나 아키텍처가 다르면 태그 소스에서 `cargo build --release --workspace --locked`로 빌드한다. Linux 소스 빌드 최소 Rust 버전은 1.86이고, 릴리즈 검증 버전은 1.93.1이다.
+v0.5.0 패키지는 x86_64 Linux와 **glibc 2.39 이상**을 요구한다. `libgcc_s.so.1`, `libm.so.6`, `libc.so.6`, `/lib64/ld-linux-x86-64.so.2`가 필요하다. 배포판의 glibc가 더 오래되었거나 아키텍처가 다르면 태그 소스에서 `cargo build --release --workspace --locked`로 빌드한다. Linux 소스 빌드 최소 Rust 버전은 1.86이고, 릴리즈 검증 버전은 1.93.1이다.
 
-[v0.4.0 GitHub 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.4.0)에서 압축 파일과 `SHA256SUMS`를 같은 새 디렉터리에 내려받고 검증한다. [릴리즈 노트](releases/v0.4.0.md)에 기능 변경과 정책 설정 이전 절차가 있다.
+[v0.5.0 GitHub 릴리즈](https://github.com/hkjang/ArgosAISecurity/releases/tag/v0.5.0)에서 압축 파일과 `SHA256SUMS`를 같은 새 디렉터리에 내려받고 검증한다. [릴리즈 노트](releases/v0.5.0.md)에 기능 변경과 정책 설정 이전 절차가 있다.
 
 ```bash
-mkdir argos-v0.4.0-download
-cd argos-v0.4.0-download
-curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.4.0/argos-v0.4.0-linux-x86_64-gnu.tar.gz
-curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.4.0/SHA256SUMS
+mkdir argos-v0.5.0-download
+cd argos-v0.5.0-download
+curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.5.0/argos-v0.5.0-linux-x86_64-gnu.tar.gz
+curl -fLO https://github.com/hkjang/ArgosAISecurity/releases/download/v0.5.0/SHA256SUMS
 sha256sum -c SHA256SUMS
-tar -xzf argos-v0.4.0-linux-x86_64-gnu.tar.gz
-cd argos-v0.4.0-linux-x86_64-gnu
+tar -xzf argos-v0.5.0-linux-x86_64-gnu.tar.gz
+cd argos-v0.5.0-linux-x86_64-gnu
 ./bin/argos --version
 ./bin/argos --help
 ```
@@ -40,7 +40,7 @@ mkdir -p watched argos-data
 
 ## systemd 서비스
 
-기존 설치를 교체할 때는 먼저 서비스를 중지하고 설정, 이벤트 DB 및 백업 저장소를 보관한다. 서명 정책을 사용하면 정책 상태 디렉터리도 함께 보관하고 [정책 설정 이전](FEATURE_POLICY.md#이전-설정에서-이전하기)을 먼저 완료한다. v0.1.0의 `policy.pubkey`만 있는 정책은 v0.4.0 운영 활성화에서 거부된다. 설치 예시는 다음과 같다. 기존 `/etc/argos/argos.toml`은 덮어쓰지 않는다.
+기존 설치를 교체할 때는 먼저 서비스를 중지하고 설정, 이벤트 DB 및 백업 저장소를 보관한다. 서명 정책을 사용하면 정책 상태 디렉터리도 함께 보관하고 [정책 설정 이전](FEATURE_POLICY.md#이전-설정에서-이전하기)을 먼저 완료한다. v0.1.0의 `policy.pubkey`만 있는 정책은 v0.5.0 운영 활성화에서 거부된다. 설치 예시는 다음과 같다. 기존 `/etc/argos/argos.toml`은 덮어쓰지 않는다.
 
 ```bash
 sudo install -m 0755 bin/argos bin/argos-agent bin/argos-central bin/argos-vault /usr/bin/
@@ -81,7 +81,7 @@ python3 scripts/security-scenarios.py --bin-dir "$PWD/bin"
 - 사고 인계용 내보내기와 해시 검증: [증거 패키지](FEATURE_EVIDENCE_PACKAGE.md)
 - 기간별 AI 근거 조회와 Ollama 설정: [AI 조사](FEATURE_AI.md)
 
-## v0.4.0 검증 도구 준비
+## v0.5.0 검증 도구 준비
 
 `argos-vault`는 별도 보관 호스트에 설치하고 [인증·TLS·키 설정](FEATURE_REMOTE_VAULT.md)을 적용한다. 에이전트 설치만으로 원격 보관이 활성화되지는 않는다. PostgreSQL 복구 시험에는 일반 사용자, 작동하는 `/usr/bin/bwrap`과 별도 PostgreSQL 도구가 필요하다. [복구 계획](FEATURE_SERVICE_RECOVERY.md)에 입력 형식과 검증 범위를 설명한다.
 
@@ -97,3 +97,11 @@ python3 scripts/service-recovery-scenarios.py --bin-dir "$PWD/bin" --pg-root /
 추가 시나리오는 Python 3.11 이상을 사용한다. 실제 자료 대신 임시 합성 데이터와 loopback 시험 서버를 사용하며 PostgreSQL 드릴은 root로 실행하지 않는다.
 
 v0.3.0 보관 서버에서 이전할 때는 [용량 기본값·정합성 검사](FEATURE_VAULT_CAPACITY.md)를 먼저 확인한다. 기존 복구 v1 보고서는 새 `verify`의 성공 근거로 사용할 수 없으므로 현재 계획으로 시험을 다시 실행한다. 대기열은 선택 기능이며 [영속 전송 안내](FEATURE_VAULT_QUEUE.md)의 완료 이력 상한과 재시도 명령을 확인한다.
+
+## v0.5.0 큐 운영 이전
+
+v0.4.0의 전송 프로세스를 모두 종료하고 큐를 보관한 뒤 교체한다. 첫 변경 작업이 기존 서명 수신증명을 검증하고 큐 DB를 v2로 원자적으로 이전한다. 이전 뒤 v0.4.0 바이너리를 같은 큐에 사용하지 않는다. 완료 이력은 활성 항목 한도에서 제외되지만 총 예약 슬롯 100,000개 한도가 있다. [이력 내보내기](FEATURE_VAULT_QUEUE.md)와 [선택적 예약 전송](FEATURE_VAULT_SCHEDULER.md)을 따른다.
+
+```bash
+python3 scripts/queue-operations-scenarios.py --bin-dir "$PWD/bin"
+```

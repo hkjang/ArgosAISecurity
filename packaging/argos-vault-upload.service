@@ -1,0 +1,25 @@
+# 별도 전송 계정·0600 클라이언트 설정·0700 큐를 준비한 뒤 timer를 활성화한다.
+[Unit]
+Description=Argos vault queued upload batch
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/argos-upload/vault-upload.toml
+ConditionPathExists=/var/lib/argos-upload/queue/queue.sqlite3
+
+[Service]
+Type=oneshot
+User=argos-upload
+Group=argos-upload
+StateDirectory=argos-upload
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/bin/argos vault --vault-config /etc/argos-upload/vault-upload.toml queue drain --directory /var/lib/argos-upload/queue --max-items 16
+# 16건 × 클라이언트 최대 300초와 로컬 작업 여유. 종료된 임대는 만료 뒤 재처리한다.
+TimeoutStartSec=90min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/argos-upload
+

@@ -19,13 +19,16 @@ const OBJECTS: &str = "objects";
 const MAX_ITEMS: u64 = 10_000;
 const MAX_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const STATUS_ITEMS: usize = 100;
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
+/// 완료 수신증명과 아직 완료되지 않은 예약의 합계. 자동 삭제하지 않는다.
+pub const MAX_ARCHIVE_ITEMS: u64 = 100_000;
+const LEASE_GRACE_MS: u64 = 30_000;
 const ITEM_COLUMNS:&str="id,kind,sha256,size_bytes,state,created_at_ms,attempts,next_retry_ms,last_error,sent_at_ms,receipt_json";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct QueueLimits {
-    /// 완료된 수신증명 이력도 포함한다. 자동으로 이력을 삭제하지 않는다.
+    /// 임대 중인 항목을 포함한 활성 항목만 계산한다. 완료 이력은 별도 보관한다.
     pub max_items: u64,
     /// 아직 완료 처리되지 않은 스냅샷의 바이트 합계.
     pub max_bytes: u64,
@@ -42,7 +45,7 @@ impl QueueLimits {
     fn validate(self) -> Result<()> {
         if !(1..=MAX_ITEMS).contains(&self.max_items) || !(1..=MAX_BYTES).contains(&self.max_bytes)
         {
-            return Err("큐 상한은 기록 1~10000개, pending 본문 1바이트~8GiB입니다".into());
+            return Err("활성 큐 상한은 1~10000개, 본문 1바이트~8GiB입니다".into());
         }
         Ok(())
     }
@@ -68,7 +71,7 @@ pub struct QueueTarget {
 }
 impl QueueTarget {
     fn from_config(config: &VaultConfig) -> Result<Self> {
-        let (_, url) = client::connection(config)?; // 설정 검사만 하며 네트워크에 연결하지 않는다.
+        let url = client::validated_endpoint(config)?; // 설정 검사만 하며 네트워크에 연결하지 않는다.
         if !valid_id(&config.agent_id) {
             return Err("큐 에이전트 ID 오류".into());
         }
@@ -82,7 +85,7 @@ impl QueueTarget {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItem {
     pub id: String,
     pub kind: String,
@@ -105,6 +108,10 @@ pub struct QueueStatus {
     pub sent_items: u64,
     pub pending_bytes: u64,
     pub failed_items: u64,
+    pub leased_items: u64,
+    pub archive_items: u64,
+    pub archive_capacity: u64,
+    pub archive_slots_available: u64,
     pub earliest_retry_ms: Option<u64>,
     /// 최근 최대 100개. 전체 상태 집계는 전체 큐를 사용한다.
     pub items: Vec<QueueItem>,
@@ -196,8 +203,22 @@ impl Lock {
         #[cfg(unix)]
         {
             use std::os::fd::AsRawFd;
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-                return Err("큐가 다른 enqueue/drain 작업에서 사용 중입니다".into());
+            let started = std::time::Instant::now();
+            loop {
+                if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                    break;
+                }
+                let error = std::io::Error::last_os_error();
+                if !matches!(
+                    error.raw_os_error(),
+                    Some(libc::EWOULDBLOCK) | Some(libc::EINTR)
+                ) {
+                    return Err(error.into());
+                }
+                if started.elapsed() >= Duration::from_secs(2) {
+                    return Err("큐 상태 변경 잠금이 2초 동안 사용 중입니다".into());
+                }
+                std::thread::sleep(Duration::from_millis(5));
             }
         }
         #[cfg(not(unix))]
@@ -254,7 +275,12 @@ fn open_mutating(
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch("CREATE TABLE queue_meta(singleton INTEGER PRIMARY KEY CHECK(singleton=1),target_json TEXT NOT NULL,max_items INTEGER NOT NULL,max_bytes INTEGER NOT NULL);
 CREATE TABLE queue_items(id TEXT PRIMARY KEY,kind TEXT NOT NULL,sha256 TEXT NOT NULL,size_bytes INTEGER NOT NULL CHECK(size_bytes>=0),state TEXT NOT NULL CHECK(state IN ('pending','sent')),created_at_ms INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_retry_ms INTEGER NOT NULL,last_error TEXT,sent_at_ms INTEGER,receipt_json TEXT,UNIQUE(kind,sha256));
-CREATE INDEX queue_due ON queue_items(state,next_retry_ms,created_at_ms);")?;
+CREATE INDEX queue_due ON queue_items(state,next_retry_ms,created_at_ms);
+ALTER TABLE queue_items ADD COLUMN lease_token TEXT;
+ALTER TABLE queue_items ADD COLUMN lease_expires_ms INTEGER;
+CREATE TABLE receipt_archive AS SELECT * FROM queue_items WHERE 0;
+CREATE UNIQUE INDEX archive_id ON receipt_archive(id);
+CREATE UNIQUE INDEX archive_object ON receipt_archive(kind,sha256);")?;
         tx.execute(
             "INSERT INTO queue_meta(singleton,target_json,max_items,max_bytes) VALUES(1,?1,?2,?3)",
             params![
@@ -267,6 +293,7 @@ CREATE INDEX queue_due ON queue_items(state,next_retry_ms,created_at_ms);")?;
         tx.commit()?;
     }
     validate_database(&conn)?;
+    migrate(&mut conn)?;
     conn.pragma_update(None, "journal_mode", "DELETE")?;
     conn.pragma_update(None, "synchronous", "FULL")?;
     cleanup(directory, &conn)?;
@@ -275,7 +302,7 @@ CREATE INDEX queue_due ON queue_items(state,next_retry_ms,created_at_ms);")?;
 
 fn validate_database(conn: &Connection) -> Result<()> {
     let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version != SCHEMA_VERSION {
+    if !matches!(version, 1 | SCHEMA_VERSION) {
         return Err(
             "큐 DB 형식이 없거나 지원하지 않습니다. 남은 파일을 보존하고 점검하세요".into(),
         );
@@ -303,6 +330,71 @@ fn validate_database(conn: &Connection) -> Result<()> {
     }
     crate::public_key(&target.pinned_pubkey)?;
     limits.validate()?;
+    let active: u64 = conn.query_row("SELECT COUNT(*) FROM queue_items", [], |r| r.get(0))?;
+    if active > MAX_ITEMS {
+        return Err("활성 큐 절대 상한 초과".into());
+    }
+    if version == SCHEMA_VERSION {
+        conn.prepare("SELECT lease_token,lease_expires_ms FROM queue_items LIMIT 0")?;
+        conn.prepare(&format!(
+            "SELECT {ITEM_COLUMNS} FROM receipt_archive LIMIT 0"
+        ))?;
+        let archived: u64 =
+            conn.query_row("SELECT COUNT(*) FROM receipt_archive", [], |r| r.get(0))?;
+        if archived.saturating_add(active) > MAX_ARCHIVE_ITEMS {
+            return Err("큐 수신증명 보관 상한 초과".into());
+        }
+        let bad: u64 = conn.query_row("SELECT COUNT(*) FROM queue_items WHERE state!='pending' OR receipt_json IS NOT NULL OR sent_at_ms IS NOT NULL OR ((lease_token IS NULL)!=(lease_expires_ms IS NULL))", [], |r| r.get(0))?;
+        let duplicates: u64 = conn.query_row("SELECT COUNT(*) FROM queue_items q JOIN receipt_archive a ON q.id=a.id OR (q.kind=a.kind AND q.sha256=a.sha256)", [], |r| r.get(0))?;
+        let bad_archive:u64=conn.query_row("SELECT COUNT(*) FROM receipt_archive WHERE state!='sent' OR receipt_json IS NULL OR sent_at_ms IS NULL OR lease_token IS NOT NULL OR lease_expires_ms IS NOT NULL",[],|r|r.get(0))?;
+        if bad != 0 || duplicates != 0 || bad_archive != 0 {
+            return Err("활성 큐/수신증명 보관 스키마 상태 오류".into());
+        }
+    }
+    Ok(())
+}
+fn verified_item(item: &QueueItem, target: &QueueTarget) -> Result<()> {
+    let ack = item
+        .receipt
+        .as_ref()
+        .ok_or("완료 항목에 수신증명이 없습니다")?;
+    verify_receipt(ack, &target.pinned_pubkey)?;
+    if !id_ok(&item.id)
+        || item.state != "sent"
+        || item.sent_at_ms.is_none()
+        || ack.receipt.agent_id != target.agent_id
+        || ack.receipt.key_id != target.key_id
+        || ack.receipt.kind != item.kind
+        || ack.receipt.sha256 != item.sha256
+        || ack.receipt.size_bytes != item.size_bytes
+    {
+        return Err("완료 항목과 서명 수신증명이 일치하지 않습니다".into());
+    }
+    Ok(())
+}
+fn migrate(conn: &mut Connection) -> Result<()> {
+    let version: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if version == SCHEMA_VERSION {
+        return Ok(());
+    }
+    let (target, _) = metadata(conn)?.ok_or("큐 대상 없음")?;
+    // DDL이나 파일 정리 전에 모든 이전 완료 수신증명을 검증한다.
+    {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {ITEM_COLUMNS} FROM queue_items WHERE state='sent'"
+        ))?;
+        for row in stmt.query_map([], decode)? {
+            verified_item(&row?, &target)?;
+        }
+        let bad: u64 = conn.query_row("SELECT COUNT(*) FROM queue_items WHERE state NOT IN ('pending','sent') OR (state='pending' AND (receipt_json IS NOT NULL OR sent_at_ms IS NOT NULL))", [], |r| r.get(0))?;
+        if bad != 0 {
+            return Err("기존 큐 상태가 유효하지 않아 마이그레이션을 거부합니다".into());
+        }
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch("ALTER TABLE queue_items ADD COLUMN lease_token TEXT; ALTER TABLE queue_items ADD COLUMN lease_expires_ms INTEGER; CREATE TABLE receipt_archive AS SELECT * FROM queue_items WHERE state='sent'; CREATE UNIQUE INDEX archive_id ON receipt_archive(id); CREATE UNIQUE INDEX archive_object ON receipt_archive(kind,sha256); DELETE FROM queue_items WHERE state='sent';")?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.commit()?;
     Ok(())
 }
 fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItem> {
@@ -407,6 +499,18 @@ fn cleanup(directory: &Path, conn: &Connection) -> Result<()> {
         let temporary = name.starts_with(".argos-vault-") && name.ends_with(".tmp");
         let id = name.strip_suffix(".bin").filter(|id| id_ok(id));
         if temporary || id.is_some_and(|id| !pending.contains(id)) {
+            if let Some(id) = id {
+                if let Some(completed) = conn
+                    .query_row(
+                        &format!("SELECT {ITEM_COLUMNS} FROM receipt_archive WHERE id=?1"),
+                        [id],
+                        decode,
+                    )
+                    .optional()?
+                {
+                    verified_item(&completed, &metadata(conn)?.ok_or("큐 대상 없음")?.0)?;
+                }
+            }
             fs::remove_file(entry.path())?;
             removed = true;
         } else if id.is_none() {
@@ -440,20 +544,25 @@ pub fn enqueue(
     assert_target(&tx, &target)?;
     if let Some(item) = tx
         .query_row(
-            &format!("SELECT {ITEM_COLUMNS} FROM queue_items WHERE kind=?1 AND sha256=?2"),
+            &format!("SELECT {ITEM_COLUMNS} FROM queue_items WHERE kind=?1 AND sha256=?2 UNION ALL SELECT {ITEM_COLUMNS} FROM receipt_archive WHERE kind=?1 AND sha256=?2"),
             params![kind, hash],
             decode,
         )
         .optional()?
     {
+        if item.state == "sent" { verified_item(&item, &target)?; }
         tx.commit()?;
         return Ok(item);
     }
     let (count,pending_bytes):(u64,u64)=tx.query_row("SELECT COUNT(*),COALESCE(SUM(CASE WHEN state='pending' THEN size_bytes ELSE 0 END),0) FROM queue_items",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+    let archived: u64 = tx.query_row("SELECT COUNT(*) FROM receipt_archive", [], |r| r.get(0))?;
+    if count.saturating_add(archived) >= MAX_ARCHIVE_ITEMS {
+        return Err("수신증명 보관 상한(100000건)에 도달했습니다. 남은 항목 전송 뒤 export-archive하고 기존 큐를 보존한 채 새 경로를 사용하세요".into());
+    }
     if count >= limits.max_items
         || pending_bytes.saturating_add(bytes.len() as u64) > limits.max_bytes
     {
-        return Err("큐 기록/본문 용량 상한에 도달했습니다. 완료 큐를 보존하고 새 큐를 사용하거나 상한을 검토하세요".into());
+        return Err("활성 큐 기록/본문 용량 상한에 도달했습니다. pending 항목을 전송하거나 상한을 검토하세요".into());
     }
     let mut random = [0u8; 16];
     OsRng
@@ -481,8 +590,7 @@ pub fn enqueue(
     result
 }
 
-/// 읽기 전용. 파일 생성·정리·재시도 갱신·통신을 하지 않는다.
-pub fn status(directory: &Path) -> Result<QueueStatus> {
+fn open_readonly(directory: &Path) -> Result<Connection> {
     validate_private_directory(directory)?;
     private_file(&directory.join(DB))?;
     let conn = Connection::open_with_flags(
@@ -490,14 +598,55 @@ pub fn status(directory: &Path) -> Result<QueueStatus> {
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     conn.busy_timeout(Duration::from_secs(2))?;
+    validate_database(&conn)?;
+    Ok(conn)
+}
+fn item_source(conn: &Connection) -> Result<String> {
+    let version: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    Ok(if version == 1 {
+        "queue_items".into()
+    } else {
+        format!("(SELECT {ITEM_COLUMNS} FROM queue_items UNION ALL SELECT {ITEM_COLUMNS} FROM receipt_archive)")
+    })
+}
+/// 읽기 전용. 이전 형식도 조회하되 마이그레이션·파일 정리·통신을 하지 않는다.
+pub fn status(directory: &Path) -> Result<QueueStatus> {
+    let conn = open_readonly(directory)?;
     let tx = conn.unchecked_transaction()?;
     let meta = metadata(&tx)?;
-    let (items_total,pending_items,sent_items,pending_bytes,failed_items,earliest_retry_ms):(u64,u64,u64,u64,u64,Option<u64>)=tx.query_row("SELECT COUNT(*),COALESCE(SUM(state='pending'),0),COALESCE(SUM(state='sent'),0),COALESCE(SUM(CASE WHEN state='pending' THEN size_bytes ELSE 0 END),0),COALESCE(SUM(state='pending' AND last_error IS NOT NULL),0),MIN(CASE WHEN state='pending' THEN next_retry_ms END) FROM queue_items",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
+    let source = item_source(&tx)?;
+    let (items_total,pending_items,sent_items,pending_bytes,failed_items,earliest_retry_ms):(u64,u64,u64,u64,u64,Option<u64>)=tx.query_row(&format!("SELECT COUNT(*),COALESCE(SUM(state='pending'),0),COALESCE(SUM(state='sent'),0),COALESCE(SUM(CASE WHEN state='pending' THEN size_bytes ELSE 0 END),0),COALESCE(SUM(state='pending' AND last_error IS NOT NULL),0),MIN(CASE WHEN state='pending' THEN next_retry_ms END) FROM {source}"),[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
+    let version: u32 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    let earliest_retry_ms = if version == 1 {
+        earliest_retry_ms
+    } else {
+        tx.query_row(
+            "SELECT MIN(MAX(next_retry_ms,COALESCE(lease_expires_ms,0))) FROM queue_items",
+            [],
+            |r| r.get(0),
+        )?
+    };
+    let leased_items = if version == 1 {
+        0
+    } else {
+        tx.query_row(
+            "SELECT COUNT(*) FROM queue_items WHERE lease_expires_ms>?1",
+            [crate::now_ms()],
+            |r| r.get(0),
+        )?
+    };
     let items = {
-        let mut stmt=tx.prepare(&format!("SELECT {ITEM_COLUMNS} FROM queue_items ORDER BY created_at_ms DESC,id DESC LIMIT {STATUS_ITEMS}"))?;
+        let mut stmt = tx.prepare(&format!("SELECT {ITEM_COLUMNS} FROM {source} ORDER BY created_at_ms DESC,id DESC LIMIT {STATUS_ITEMS}"))?;
         let items = stmt
             .query_map([], decode)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        if let Some((target, _)) = &meta {
+            for item in &items {
+                if item.state == "sent" {
+                    verified_item(item, target)?;
+                }
+            }
+        }
         items
     };
     tx.commit()?;
@@ -510,30 +659,39 @@ pub fn status(directory: &Path) -> Result<QueueStatus> {
         pending_bytes,
         failed_items,
         earliest_retry_ms,
+        leased_items,
+        archive_items: sent_items,
+        archive_capacity: MAX_ARCHIVE_ITEMS,
+        archive_slots_available: MAX_ARCHIVE_ITEMS.saturating_sub(items_total),
         items_truncated: items_total > items.len() as u64,
         items,
     })
 }
-/// 임의 이력 1건과 저장된 수신증명을 읽는다. 최근 100건 밖의 완료 이력도 조회할 수 있다.
+/// 임의 활성 항목 또는 오래된 완료 수신증명을 읽고 완료 서명을 검증한다.
 pub fn item(directory: &Path, id: &str) -> Result<QueueItem> {
     if !id_ok(id) {
         return Err("큐 ID는 소문자 hex 32자여야 합니다".into());
     }
-    validate_private_directory(directory)?;
-    private_file(&directory.join(DB))?;
-    let conn = Connection::open_with_flags(
-        directory.join(DB),
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    conn.busy_timeout(Duration::from_secs(2))?;
-    conn.query_row(
-        &format!("SELECT {ITEM_COLUMNS} FROM queue_items WHERE id=?1"),
-        [id],
-        decode,
-    )
-    .optional()?
-    .ok_or_else(|| "큐 항목을 찾을 수 없습니다".into())
+    let conn = open_readonly(directory)?;
+    let tx = conn.unchecked_transaction()?;
+    let source = item_source(&tx)?;
+    let item = tx
+        .query_row(
+            &format!("SELECT {ITEM_COLUMNS} FROM {source} WHERE id=?1"),
+            [id],
+            decode,
+        )
+        .optional()?
+        .ok_or("큐 항목을 찾을 수 없습니다")?;
+    if item.state == "sent" {
+        verified_item(&item, &metadata(&tx)?.ok_or("큐 대상 없음")?.0)?;
+    }
+    tx.commit()?;
+    Ok(item)
 }
+
+mod archive;
+pub use archive::{export_archive, verify_archive, ArchiveExportReport, ArchiveVerification};
 
 fn retry_delay(attempts: u32) -> u64 {
     5000u64
@@ -541,8 +699,94 @@ fn retry_delay(attempts: u32) -> u64 {
         .min(3_600_000)
 }
 
-/// 한 번의 제한된 배치만 전송한다. 토큰은 config에서 읽어 네트워크 호출에만 사용한다.
-/// 요청 전에 attempts/backoff를 커밋하므로 ACK 유실·중단 후에도 같은 대상과 바이트로 재시도한다.
+struct Lease {
+    item: QueueItem,
+    token: String,
+}
+fn random_id() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    OsRng
+        .try_fill_bytes(&mut bytes)
+        .map_err(|_| "큐 임대 난수 생성 실패")?;
+    Ok(hex::encode(bytes))
+}
+fn claim(
+    directory: &Path,
+    target: &QueueTarget,
+    timeout_secs: u64,
+    now: u64,
+) -> Result<Option<Lease>> {
+    let (_lock, mut conn) = open_mutating(directory, None)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    assert_target(&tx, target)?;
+    let now = now.max(crate::now_ms()).min(i64::MAX as u64);
+    let item = tx.query_row(&format!("SELECT {ITEM_COLUMNS} FROM queue_items WHERE next_retry_ms<=?1 AND (lease_expires_ms IS NULL OR lease_expires_ms<=?1) ORDER BY created_at_ms,id LIMIT 1"),[now],decode).optional()?;
+    let Some(mut item) = item else {
+        tx.commit()?;
+        return Ok(None);
+    };
+    if !valid_kind(&item.kind)
+        || !valid_hash(&item.sha256)
+        || item.size_bytes > MAX_OBJECT_BYTES as u64
+    {
+        return Err("큐 항목 메타데이터 오류".into());
+    }
+    let token = random_id()?;
+    let expires = now
+        .saturating_add(timeout_secs.saturating_mul(1000))
+        .saturating_add(LEASE_GRACE_MS)
+        .min(i64::MAX as u64);
+    item.attempts = item.attempts.saturating_add(1);
+    let next = now
+        .saturating_add(retry_delay(item.attempts))
+        .min(i64::MAX as u64);
+    tx.execute("UPDATE queue_items SET lease_token=?1,lease_expires_ms=?2,attempts=?3,next_retry_ms=?4,last_error='interrupted_or_unconfirmed' WHERE id=?5",params![token,expires,item.attempts,next,item.id])?;
+    tx.commit()?;
+    Ok(Some(Lease { item, token }))
+}
+/// 완료/실패 시 임대 소유권을 다시 확인한다. 오래된 작업자는 새 임대의 상태나 본문을 바꾸지 못한다.
+fn finish(
+    directory: &Path,
+    target: &QueueTarget,
+    lease: &Lease,
+    result: &std::result::Result<SignedReceipt, &'static str>,
+    now: u64,
+) -> Result<bool> {
+    let (_lock, mut conn) = open_mutating(directory, None)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    assert_target(&tx, target)?;
+    let now = now.max(crate::now_ms()).min(i64::MAX as u64);
+    let owns:bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM queue_items WHERE id=?1 AND lease_token=?2 AND lease_expires_ms>?3)",params![lease.item.id,lease.token,now],|r|r.get(0))?;
+    if !owns {
+        tx.commit()?;
+        return Ok(false);
+    }
+    if let Ok(receipt) = result {
+        let mut completed = lease.item.clone();
+        completed.state = "sent".into();
+        completed.receipt = Some(receipt.clone());
+        completed.sent_at_ms = Some(now);
+        verified_item(&completed, target)?;
+        tx.execute("INSERT INTO receipt_archive(id,kind,sha256,size_bytes,state,created_at_ms,attempts,next_retry_ms,last_error,sent_at_ms,receipt_json) SELECT id,kind,sha256,size_bytes,'sent',created_at_ms,attempts,0,NULL,?1,?2 FROM queue_items WHERE id=?3 AND lease_token=?4",params![now,serde_json::to_string(receipt)?,lease.item.id,lease.token])?;
+        tx.execute(
+            "DELETE FROM queue_items WHERE id=?1 AND lease_token=?2",
+            params![lease.item.id, lease.token],
+        )?;
+        tx.commit()?;
+        // 완료 archive COMMIT 이후에만 지운다. 중단하면 다음 mutating open에서 정리한다.
+        fs::remove_file(snapshot(directory, &lease.item.id)?)?;
+        crate::sync_directory(&directory.join(OBJECTS))?;
+    } else {
+        let retry = now
+            .saturating_add(retry_delay(lease.item.attempts))
+            .min(i64::MAX as u64);
+        tx.execute("UPDATE queue_items SET lease_token=NULL,lease_expires_ms=NULL,next_retry_ms=?1,last_error=?2 WHERE id=?3 AND lease_token=?4",params![retry,result.as_ref().err().copied().unwrap_or("unknown"),lease.item.id,lease.token])?;
+        tx.commit()?;
+    }
+    Ok(true)
+}
+/// 항목별 임대를 먼저 커밋하고 잠금과 DB를 닫은 뒤 네트워크를 사용한다.
+/// enqueue는 전송 대기 시간과 무관하며 중단된 임대는 만료 후 다른 작업자가 재처리한다.
 pub fn drain_once(
     directory: &Path,
     config: &VaultConfig,
@@ -553,16 +797,6 @@ pub fn drain_once(
     }
     let target = QueueTarget::from_config(config)?;
     client::token(&config.upload_token)?;
-    let (_lock, mut conn) = open_mutating(directory, None)?;
-    assert_target(&conn, &target)?;
-    let now = crate::now_ms().min(i64::MAX as u64);
-    let batch = {
-        let mut stmt=conn.prepare(&format!("SELECT {ITEM_COLUMNS} FROM queue_items WHERE state='pending' AND next_retry_ms<=?1 ORDER BY created_at_ms,id LIMIT ?2"))?;
-        let items = stmt
-            .query_map(params![now, options.max_items as u64], decode)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        items
-    };
     let mut report = DrainReport {
         attempted: 0,
         sent: 0,
@@ -570,84 +804,49 @@ pub fn drain_once(
         remaining_pending: 0,
         items: vec![],
     };
-    for item in batch {
-        let path = snapshot(directory, &item.id)?;
-        if !valid_kind(&item.kind)
-            || !valid_hash(&item.sha256)
-            || item.size_bytes > MAX_OBJECT_BYTES as u64
-        {
-            return Err("큐 항목 메타데이터 오류".into());
-        }
-        let attempts = item.attempts.saturating_add(1);
-        let next = crate::now_ms()
-            .saturating_add(retry_delay(attempts))
-            .min(i64::MAX as u64);
-        {
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            tx.execute("UPDATE queue_items SET attempts=?1,next_retry_ms=?2,last_error='interrupted_or_unconfirmed' WHERE id=?3 AND state='pending'",params![attempts,next,item.id])?;
-            tx.commit()?;
-        }
+    for _ in 0..options.max_items {
+        let Some(lease) = claim(directory, &target, config.timeout_secs, crate::now_ms())? else {
+            break;
+        };
         report.attempted += 1;
-        let result = (|| -> Result<SignedReceipt> {
-            private_file(&path)?;
-            let bytes = read_bounded(&path, config.max_object_bytes)?;
-            if bytes.len() as u64 != item.size_bytes || sha256(&bytes) != item.sha256 {
-                return Err("큐 스냅샷 해시/크기 불일치".into());
+        let result = (|| -> std::result::Result<SignedReceipt, &'static str> {
+            let path = snapshot(directory, &lease.item.id).map_err(|_| "queue_local")?;
+            private_file(&path).map_err(|_| "queue_local")?;
+            let bytes = read_bounded(&path, config.max_object_bytes).map_err(|_| "queue_local")?;
+            if bytes.len() as u64 != lease.item.size_bytes || sha256(&bytes) != lease.item.sha256 {
+                return Err("queue_local");
             }
-            let receipt = client::upload_bytes(config, bytes, &item.kind)?;
-            verify_receipt(&receipt, &target.pinned_pubkey)?;
-            if receipt.receipt.sha256 != item.sha256
-                || receipt.receipt.size_bytes != item.size_bytes
-                || receipt.receipt.kind != item.kind
-                || receipt.receipt.agent_id != target.agent_id
-                || receipt.receipt.key_id != target.key_id
-            {
-                return Err("큐 항목과 수신증명이 다릅니다".into());
-            }
+            let receipt = client::upload_bytes(config, bytes, &lease.item.kind)
+                .map_err(|e| client::error_code(e.as_ref()))?;
+            let mut completed = lease.item.clone();
+            completed.state = "sent".into();
+            completed.receipt = Some(receipt.clone());
+            completed.sent_at_ms = Some(crate::now_ms());
+            verified_item(&completed, &target).map_err(|_| "response_integrity")?;
             Ok(receipt)
         })();
-        match result {
-            Ok(receipt) => {
-                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                tx.execute("UPDATE queue_items SET state='sent',receipt_json=?1,sent_at_ms=?2,last_error=NULL,next_retry_ms=0 WHERE id=?3",params![serde_json::to_string(&receipt)?,crate::now_ms().min(i64::MAX as u64),item.id])?;
-                tx.commit()?; // 검증 수신증명이 영속화되기 전에는 snapshot을 지우지 않는다.
-                fs::remove_file(path)?;
-                crate::sync_directory(&directory.join(OBJECTS))?;
-                report.sent += 1;
-                report.items.push(DrainOutcome {
-                    id: item.id,
-                    sent: true,
-                    error: None,
-                    receipt: Some(receipt),
-                });
-            }
-            Err(_) => {
-                // 원격 응답·토큰을 오류 문자열이나 DB로 반사하지 않는다.
-                let code = "snapshot_upload_or_receipt_validation_failed";
-                let retry = crate::now_ms()
-                    .saturating_add(retry_delay(attempts))
-                    .min(i64::MAX as u64);
-                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                tx.execute(
-                    "UPDATE queue_items SET next_retry_ms=?1,last_error=?2 WHERE id=?3",
-                    params![retry, code, item.id],
-                )?;
-                tx.commit()?;
-                report.failed += 1;
-                report.items.push(DrainOutcome {
-                    id: item.id,
-                    sent: false,
-                    error: Some(code.into()),
-                    receipt: None,
-                });
-            }
+        let committed = finish(directory, &target, &lease, &result, crate::now_ms())?;
+        let sent = committed && result.is_ok();
+        let error = if !committed {
+            Some("lease_expired_or_replaced".into())
+        } else if let Err(code) = &result {
+            Some((*code).into())
+        } else {
+            None
+        };
+        if sent {
+            report.sent += 1;
+        } else {
+            report.failed += 1;
         }
+        report.items.push(DrainOutcome {
+            id: lease.item.id,
+            sent,
+            error,
+            receipt: if sent { result.ok() } else { None },
+        });
     }
-    report.remaining_pending = conn.query_row(
-        "SELECT COUNT(*) FROM queue_items WHERE state='pending'",
-        [],
-        |r| r.get(0),
-    )?;
+    report.remaining_pending = status(directory)?.pending_items;
     Ok(report)
 }
 

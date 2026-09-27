@@ -1,7 +1,7 @@
 # Argos 시스템·인프라 운영자 가이드
 
 운영자는 에이전트 가동, 센서·백업·전송 상태, 디스크 용량과 실제 파일 복구를 담당한다.
-이 문서는 v0.4.0 기준이다. 정책 승인·서명은 [보안 관리자](ROLE_ADMINISTRATOR.md),
+이 문서는 v0.5.0 기준이다. 정책 승인·서명은 [보안 관리자](ROLE_ADMINISTRATOR.md),
 사건 조사와 증거 인계는 [분석가](ROLE_ANALYST.md) 가이드와 연결한다.
 
 ## 설치와 설정
@@ -118,3 +118,5 @@ argos --config /etc/argos/argos.toml restore /srv/data/report.txt --before-ms 17
 ## v0.4.0 운영 확인
 
 [대기열](FEATURE_VAULT_QUEUE.md)의 `remaining_pending`, 오래된 재시도, 완료 이력 상한을 점검하고 명시적인 `drain`을 실행한다. [용량 상태](FEATURE_VAULT_CAPACITY.md)는 전체·에이전트 한도와 저장소 정합성을 함께 확인한다. 현재 계획과 백업으로 `service-recovery verify --max-age-secs N`을 실행하고 거부되면 원인을 확인한 후 복구 시험을 다시 수행한다.
+
+v0.5.0부터 [예약 전송](FEATURE_VAULT_SCHEDULER.md)을 선택 설치할 수 있다. pending/leased/failed 상태와 archive 예약 슬롯을 점검하고, 완료 수신증명은 [별도 내보내기](FEATURE_VAULT_QUEUE.md)로 보관한다. 업그레이드 전에 구버전 작업자를 모두 종료한다.
