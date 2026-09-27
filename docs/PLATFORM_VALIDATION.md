@@ -40,6 +40,18 @@ ARGOS_TEST_POSTGRES_ROOT=/path/to/trusted/postgresql/root cargo test -p argos-re
 
 새 시나리오는 합성 자료와 임시 loopback 서버를 사용한다. 큐의 ACK 유실 처리는 로컬 파일시스템·SQLite 동기화·신뢰한 수신증명에 의존하며 전원 차단·NFS·root 삭제를 시험한 것은 아니다. 논리 한도·공간 조회는 물리 공간 예약이나 외부 프로세스 소비 통제가 아니다. 복구 보고서의 두 번 읽기는 약 2배의 입력 읽기 비용이 있고 같은 제한 시간을 공유한다.
 
+## v0.4.0 배포 산출물 확인
+
+태그와 `BUILD_INFO.json`의 소스 커밋은 `d8af8ea051f87c07ce3b174b8b3b760e38914743`이다. 업로드한 릴리즈 패키지를 다시 내려받아 `SHA256SUMS`, 네 실행 파일의 해시·크기·도움말 실행, 소스 커밋·설정·문서·새 시나리오 포함을 확인했다. 한국어·영어 사이트와 JavaScript도 v0.4.0으로 게시되었음을 확인했다.
+
+`argos-v0.4.0-linux-x86_64-gnu.tar.gz`의 SHA-256:
+
+```text
+3ed6b07c04a9caf6bf1d6e20c03fbcf14c2d72f9f5b4fef9f381d4464a8c3e2e
+```
+
+`argos`는 glibc 2.39, 나머지 세 실행 파일은 glibc 2.34 이상을 요구하므로 패키지 기준은 2.39다. 이후 main의 배포 검증 기록 갱신은 게시한 태그·압축 파일을 변경하지 않는다.
+
 ## v0.3.0 보호·복구·근거 검증
 
 - `cargo test --workspace --offline --locked`: **188개 통과**, PostgreSQL 도구가 필요한 선택 시험 1개는 별도 실행했다. 해당 PostgreSQL 18.6 시험도 통과했다. 기본 회귀 시험은 외부 모델·운영 DB를 사용하지 않는다.
